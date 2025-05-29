@@ -1,4 +1,4 @@
-# Start from official Python image
+# Start from official Python image 
 FROM python:3.10-slim
 
 # Set working directory
@@ -10,9 +10,8 @@ COPY . /app
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Expose the FastAPI port
-EXPOSE 3001
+# Expose the correct FastAPI port (RunPod expects 8080)
+EXPOSE 8080
 
-# Run the FastAPI server
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3001"]
-
+# Run the FastAPI server on port 8080
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
