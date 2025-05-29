@@ -16,5 +16,3 @@ EXPOSE 3001
 # Run the FastAPI server
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3001"]
 
-RUN apt-get update && apt-get install -y build-essential libgl1
-
