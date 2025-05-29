@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+langchain
+python-docx
+chromadb
+ollama
+unstructured
+tqdm
+
