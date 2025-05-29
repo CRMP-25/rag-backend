@@ -23,6 +23,7 @@ async def generate_insight(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
+    print("🚀 Starting FastAPI server...")  # Add this
     uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=False)
 
 
