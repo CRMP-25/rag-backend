@@ -7,16 +7,18 @@ from rag_engine import get_rag_response
 def start_ollama():
     print("🚀 Starting Ollama in background...")
     subprocess.Popen(["ollama", "serve"])
-    time.sleep(5)
+    time.sleep(6)  # wait slightly longer
 
 if __name__ == "__main__":
     try:
         start_ollama()
 
-        # Read input safely
+        # 🔁 Try stdin, fallback if empty
         raw_input = sys.stdin.read()
         if not raw_input.strip():
-            raise ValueError("⛔ No input received on stdin.")
+            print("⛔ No input on stdin.")
+            print(json.dumps({"output": "⛔ Error: No input provided to stdin."}))
+            exit(0)
 
         print("📥 Raw Input Received:", raw_input)
         body = json.loads(raw_input)
