@@ -26,7 +26,7 @@ EXPOSE 8080
 
 # Supervisor log path and config
 RUN mkdir -p /var/log/supervisor
-COPY rag-backend/supervisord.conf /app/rag-backend/supervisord.conf
+COPY supervisord.conf /app/rag-backend/supervisord.conf
 
 # Start both Ollama + FastAPI via supervisord
 CMD ["supervisord", "-c", "/app/rag-backend/supervisord.conf"]
