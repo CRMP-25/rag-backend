@@ -1,49 +1,32 @@
-# ---------------------------
-# ✅ Base image with Python
-# ---------------------------
+# Base image
 FROM python:3.10-slim
 
-# ---------------------------
-# ✅ Install required tools
-# ---------------------------
+# System dependencies
 RUN apt-get update && apt-get install -y \
     curl git bash libglib2.0-0 libsm6 libxext6 libxrender-dev \
-    && apt-get clean
+    supervisor && apt-get clean
 
-# ---------------------------
-# ✅ Install Ollama (LLaMA3)
-# ---------------------------
+# Install Ollama
 RUN curl -fsSL https://ollama.com/install.sh | sh
 
-# ---------------------------
-# ✅ Create working directory
-# ---------------------------
+# Set working directory
 WORKDIR /app
 
-# ---------------------------
-# ✅ Copy backend code
-# ---------------------------
+# Copy all project files
 COPY . /app
 
-# ---------------------------
-# ✅ Install Python dependencies
-# ---------------------------
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ---------------------------
-# ✅ Pull the LLaMA3 model before launch
-# ---------------------------
+# Pull LLaMA3 model
 RUN ollama pull llama3
 
-# ---------------------------
-# ✅ Expose the expected FastAPI port
-# ---------------------------
+# Expose FastAPI port
 EXPOSE 8080
 
-# ---------------------------
-# ✅ Start Ollama + FastAPI together
-# ---------------------------
-CMD bash -c "\
-    ollama serve & \
-    sleep 5 && \
-    uvicorn main:app --host 0.0.0.0 --port 8080"
+# Supervisor log path and config
+RUN mkdir -p /var/log/supervisor
+COPY rag-backend/supervisord.conf /app/rag-backend/supervisord.conf
+
+# Start both Ollama + FastAPI via supervisord
+CMD ["supervisord", "-c", "/app/rag-backend/supervisord.conf"]
