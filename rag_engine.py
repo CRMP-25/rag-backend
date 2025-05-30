@@ -1,16 +1,30 @@
-# rag_engine.py
-
 import os
-from langchain.prompts import PromptTemplate
 import time
+import requests
+from langchain.prompts import PromptTemplate
+
+def wait_for_ollama(timeout=30):
+    print("⏳ Waiting for Ollama to be ready...")
+    for _ in range(timeout):
+        try:
+            r = requests.get("http://localhost:11434")
+            if r.status_code == 200:
+                print("✅ Ollama is ready.")
+                return True
+        except:
+            pass
+        time.sleep(1)
+    print("❌ Ollama did not start in time.")
+    return False
 
 def get_rag_response(query: str):
     print(f"\n🔍 Incoming query: {query}")
 
-    # ✅ Set Ollama server URL inside the function
+    if not wait_for_ollama():
+        return "⚠️ Ollama is not responding. Please try again later."
+
     os.environ["OLLAMA_BASE_URL"] = "http://localhost:11434"
 
-    # ✅ Delay imports to avoid crashing before Ollama is up
     from langchain_ollama.embeddings import OllamaEmbeddings
     from langchain_ollama import OllamaLLM
     from langchain_chroma import Chroma
@@ -35,17 +49,7 @@ def get_rag_response(query: str):
 
     context = "\n---\n".join(relevant_docs)
 
-    prompt_template = PromptTemplate.from_template("""
-        You are a helpful assistant for PMT Pro. Use ONLY the below documents to answer the question.
-
-        --- DOCUMENTS ---
-        {context}
-
-        --- QUESTION ---
-        {query}
-
-        Only answer from the documents above. If you can't find the answer, say: "I'm sorry, I couldn't find that information in the reference documents."
-    """)
+    prompt_template = PromptTemplate.from_template("""...""")
 
     final_prompt = prompt_template.format(context=context, query=query)
 

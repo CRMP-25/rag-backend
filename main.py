@@ -16,11 +16,15 @@ app.add_middleware(
 @app.post("/generate-insight")
 async def generate_insight(request: Request):
     print("📩 /generate-insight endpoint hit")
-    body = await request.json()
-    prompt = body.get("prompt", "")
-    print("📩 Prompt received:\n", prompt)
-    response = get_rag_response(prompt)
-    return {"result": response}
+    try:
+        body = await request.json()
+        prompt = body.get("prompt", "")
+        print("📩 Prompt received:\n", prompt)
+        response = get_rag_response(prompt)
+        return {"result": response}
+    except Exception as e:
+        print("❌ Request failed:", str(e))
+        return {"result": "Internal error"}
 
 if __name__ == "__main__":
     import uvicorn
