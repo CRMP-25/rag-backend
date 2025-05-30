@@ -15,6 +15,7 @@ app.add_middleware(
 
 @app.post("/generate-insight")
 async def generate_insight(request: Request):
+    print("📩 /generate-insight endpoint hit")
     body = await request.json()
     prompt = body.get("prompt", "")
     print("📩 Prompt received:\n", prompt)
