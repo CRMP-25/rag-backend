@@ -49,7 +49,17 @@ def get_rag_response(query: str):
 
     context = "\n---\n".join(relevant_docs)
 
-    prompt_template = PromptTemplate.from_template("""...""")
+    prompt_template = PromptTemplate.from_template("""
+        You are a helpful assistant for PMT Pro. Use ONLY the below documents to answer the question.
+
+        --- DOCUMENTS ---
+        {context}
+
+        --- QUESTION ---
+        {query}
+
+        Only answer from the documents above. If you can't find the answer, say: "I'm sorry, I couldn't find that information in the reference documents."
+    """)
 
     final_prompt = prompt_template.format(context=context, query=query)
 
