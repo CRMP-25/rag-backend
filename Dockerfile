@@ -19,7 +19,7 @@ COPY . /app
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pull LLaMA3 model
-RUN ollama pull llama3
+# RUN ollama pull llama3
 
 # Expose FastAPI port
 EXPOSE 8080
