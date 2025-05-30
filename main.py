@@ -3,19 +3,17 @@ import sys
 import json
 from rag_engine import get_rag_response
 
-def main():
+if __name__ == "__main__":
     try:
         body = json.load(sys.stdin)
         prompt = body.get("input", {}).get("prompt", "")
-        print(f"📩 Prompt received: {prompt}")
+        print("🔍 Prompt received:", prompt)
 
         result = get_rag_response(prompt)
         print(json.dumps({"output": result}))
-    except Exception as e:
-        print(json.dumps({"error": str(e)}))
 
-if __name__ == "__main__":
-    main()
+    except Exception as e:
+        print(json.dumps({"output": f"❌ Internal error: {str(e)}"}))
 
 
 # from fastapi import FastAPI, Request
@@ -49,12 +47,13 @@ if __name__ == "__main__":
 
 
 
-
 # if __name__ == "__main__":
 #     body = json.load(sys.stdin)
 #     prompt = body.get("input", {}).get("prompt", "")
 #     result = get_rag_response(prompt)
 #     print(json.dumps({"output": result}))
+
+
 
 
 
