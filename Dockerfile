@@ -18,15 +18,12 @@ COPY . /app
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pull LLaMA3 model
-# RUN ollama pull llama3
-
 # Expose FastAPI port
 EXPOSE 8080
 
 # Supervisor log path and config
 RUN mkdir -p /var/log/supervisor
-COPY supervisord.conf /app/rag-backend/supervisord.conf
+COPY supervisord.conf /app/supervisord.conf
 
 # Start both Ollama + FastAPI via supervisord
-CMD ["supervisord", "-c", "/app/rag-backend/supervisord.conf"]
+CMD ["supervisord", "-c", "/app/supervisord.conf"]
