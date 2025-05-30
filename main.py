@@ -1,10 +1,18 @@
-# main.py
 import sys
 import json
+import subprocess
+import time
 from rag_engine import get_rag_response
+
+def start_ollama():
+    print("🚀 Starting Ollama in background...")
+    subprocess.Popen(["ollama", "serve"])
+    time.sleep(5)  # Give Ollama time to boot
 
 if __name__ == "__main__":
     try:
+        start_ollama()  # ✅ Ensure Ollama is running before anything else
+
         body = json.load(sys.stdin)
         prompt = body.get("input", {}).get("prompt", "")
         print("🔍 Prompt received:", prompt)
