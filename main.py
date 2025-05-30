@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from rag_engine import get_rag_response
 from fastapi.middleware.cors import CORSMiddleware
+import sys, json
 
 app = FastAPI()
 
@@ -26,9 +27,14 @@ async def generate_insight(request: Request):
         print("❌ Request failed:", str(e))
         return {"result": "Internal error"}
 
+
+
+
 if __name__ == "__main__":
-    import uvicorn
-    print("🚀 Starting FastAPI server...")  # Add this
-    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=False)
+    body = json.load(sys.stdin)
+    prompt = body.get("input", {}).get("prompt", "")
+    result = get_rag_response(prompt)
+    print(json.dumps({"output": result}))
+
 
 
