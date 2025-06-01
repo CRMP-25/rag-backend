@@ -6,4 +6,5 @@ chromadb
 ollama
 unstructured
 tqdm
+langchain-community
 
