@@ -1,3 +1,7 @@
+import sys
+import pysqlite3
+sys.modules["sqlite3"] = pysqlite3
+
 from fastapi import FastAPI, Request
 from rag_engine import get_rag_response
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,8 +38,3 @@ if __name__ == "__main__":
     prompt = body.get("input", {}).get("prompt", "")
     result = get_rag_response(prompt)
     print(json.dumps({"output": result}))
-
-
-
-
-

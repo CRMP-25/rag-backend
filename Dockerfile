@@ -4,7 +4,7 @@ FROM python:3.10-slim
 # System dependencies
 RUN apt-get update && apt-get install -y \
     curl git bash libglib2.0-0 libsm6 libxext6 libxrender-dev \
-    supervisor && apt-get clean
+    python3-pip supervisor && apt-get clean
 
 # Install Ollama
 RUN curl -fsSL https://ollama.com/install.sh | sh
@@ -19,7 +19,7 @@ COPY . /app
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose FastAPI port
-EXPOSE 8080
+EXPOSE 7860
 
 # Supervisor log path and config
 RUN mkdir -p /var/log/supervisor
