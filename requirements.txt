@@ -7,4 +7,5 @@ ollama
 unstructured
 tqdm
 langchain-community
-
+langchain-chroma
+langchain_ollama

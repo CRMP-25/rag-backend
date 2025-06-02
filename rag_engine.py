@@ -1,3 +1,4 @@
+from typing import List, Dict
 import os
 import time
 import requests
@@ -18,6 +19,7 @@ def wait_for_ollama(timeout=30):
     return False
 
 def get_rag_response(query: str):
+    print("🚨 USING UPDATED CODE VERSION")
     print(f"\n🔍 Incoming query: {query}")
 
     if not wait_for_ollama():
@@ -34,16 +36,20 @@ def get_rag_response(query: str):
         embedding_function=OllamaEmbeddings(model="all-minilm")
     )
 
-    docs_and_scores = vectordb.similarity_search_with_score(query, k=3)
+    docs = vectordb.similarity_search(query, k=3)
 
-    if not docs_and_scores:
+    if not docs:
         print("⚠️ No documents returned from vector search.")
         return "⚠️ Sorry, I couldn't find anything relevant in the documents."
 
-    for i, (doc, score) in enumerate(docs_and_scores):
-        print(f"→ Doc {i+1} | Score: {score:.4f}\n{doc.page_content[:300]}...\n")
+    for i, doc in enumerate(docs):
+        print(f"→ Doc {i+1}:\n{doc.page_content[:300]}...\n")
 
-    relevant_docs = [doc.page_content for doc, score in docs_and_scores if score < 50]
+
+    print("🔍 Type of docs[0]:", type(docs[0]))
+    print("🔍 docs[0]:", docs[0])
+    relevant_docs = [doc.page_content for doc in docs]
+
     if not relevant_docs:
         return "⚠️ Sorry, I couldn't find anything relevant in the documents."
 
@@ -71,4 +77,4 @@ def get_rag_response(query: str):
         return result
     except Exception as e:
         print("❌ LLM call failed:", str(e))
-        return "⚠️ LLM failed to generate a response. Please check the backend."
+        return "⚠️ LLM failed to generate a response. Please check the backend"
