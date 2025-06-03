@@ -9,6 +9,4 @@ tqdm
 langchain-community
 langchain-chroma
 langchain_ollama
-all-minilm
-llama3
 
