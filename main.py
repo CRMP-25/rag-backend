@@ -1,7 +1,3 @@
-import sys
-import pysqlite3
-sys.modules["sqlite3"] = pysqlite3
-
 from fastapi import FastAPI, Request
 from rag_engine import get_rag_response
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,14 +20,14 @@ async def generate_insight(request: Request):
     try:
         body = await request.json()
         prompt = body.get("prompt", "")
+        user_context = body.get("context", "")  # ✅ new line
+
         print("📩 Prompt received:\n", prompt)
-        response = get_rag_response(prompt)
+        response = get_rag_response(prompt, user_context)  # ✅ updated call
         return {"result": response}
     except Exception as e:
         print("❌ Request failed:", str(e))
         return {"result": "Internal error"}
-
-
 
 if __name__ == "__main__":
     body = json.load(sys.stdin)

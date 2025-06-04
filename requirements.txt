@@ -9,4 +9,6 @@ tqdm
 langchain-community
 langchain-chroma
 langchain_ollama
-
+langchain-core
+docx2txt
+pysqlite3-binary

@@ -18,7 +18,8 @@ def wait_for_ollama(timeout=30):
     print("❌ Ollama did not start in time.")
     return False
 
-def get_rag_response(query: str):
+def get_rag_response(query: str, user_context: str = ""):
+
     print("🚨 USING UPDATED CODE VERSION")
     print(f"\n🔍 Incoming query: {query}")
 
@@ -53,19 +54,25 @@ def get_rag_response(query: str):
     if not relevant_docs:
         return "⚠️ Sorry, I couldn't find anything relevant in the documents."
 
-    context = "\n---\n".join(relevant_docs)
+    doc_context = "\n---\n".join(relevant_docs)
+    context = f"{user_context}\n\n--- DOCUMENT CONTEXT ---\n{doc_context}"
+
 
     prompt_template = PromptTemplate.from_template("""
-        You are a helpful assistant for PMT Pro. Use ONLY the below documents to answer the question.
+            You are a helpful assistant for PMT Pro. Use the context below to answer the user's question.
+            You may refer to either the USER CONTEXT or the DOCUMENT CONTEXT.
 
-        --- DOCUMENTS ---
-        {context}
+            --- USER CONTEXT ---
+            {context}
 
-        --- QUESTION ---
-        {query}
+            --- QUESTION ---
+            {query}
 
-        Only answer from the documents above. If you can't find the answer, say: "I'm sorry, I couldn't find that information in the reference documents."
-    """)
+            Only answer based on the context above. Do not make up information.
+            If the answer isn't found, say: "I'm sorry, I couldn't find that information in the context provided."
+            """)
+
+    print("🧠 Combined Context Sent to LLM:\n", context[:500], "...\n")
 
     final_prompt = prompt_template.format(context=context, query=query)
 
