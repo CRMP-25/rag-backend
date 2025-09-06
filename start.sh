@@ -11,6 +11,12 @@ if ! ollama list | grep -q llama3; then
     ollama pull llama3
 fi
 
+# ✅ Pull embedding model if not already present
+if ! ollama list | grep -q all-minilm; then
+    echo "🔄 Pulling all-minilm embeddings..."
+    ollama pull all-minilm
+fi
+
 # ✅ Build vector DB if missing
 if [ ! -d "vector_store" ] || [ -z "$(ls -A vector_store)" ]; then
     echo "🧠 No vector DB found. Creating..."

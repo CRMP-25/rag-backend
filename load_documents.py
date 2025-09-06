@@ -17,6 +17,8 @@ import os
 from langchain_community.document_loaders import Docx2txtLoader
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain_community.vectorstores import Chroma
+from langchain_ollama import OllamaEmbeddings
+
 
 # ✅ Make sure LangChain hits the correct Ollama endpoint
 os.environ["OLLAMA_BASE_URL"] = "http://localhost:11434"

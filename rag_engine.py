@@ -1,10 +1,7 @@
-from typing import List, Dict,Any
-import os
-import time
-import requests, json
+from typing import Dict, Any
+import os, time, requests, json
 from langchain.prompts import PromptTemplate
 from langchain_ollama import OllamaLLM
-
 
 def wait_for_ollama(timeout=30):
     print("⏳ Waiting for Ollama to be ready...")
@@ -14,107 +11,96 @@ def wait_for_ollama(timeout=30):
             if r.status_code == 200:
                 print("✅ Ollama is ready.")
                 return True
-        except:
+        except Exception:
             pass
         time.sleep(1)
     print("❌ Ollama did not start in time.")
     return False
 
+def interpret_query(query: str, hints: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """
+    Convert a natural-language question into structured intent.
 
+    Returns JSON like:
+    {
+      "action": "query_tasks" | "query_kanban" | "query_files" | "query_profile" | "query_messages" | "general_question",
+      "target_user": {"type": "me"} | {"type": "name", "value": "Sai Prasad"},
+      "time": {"natural": "yesterday", "start": null|"<YYYY-MM-DD>", "end": null|"<YYYY-MM-DD>"},
+      "filters": {
+        "priority": null|"High"|"Medium"|"Low",
+        "status": null|"Open"|"In Progress"|"Done"|"Completed"|"Archived",
+        "due_bucket": null|"overdue"|"today"|"tomorrow"|"this_week"|"next_week"|"this_month",
+        "board": null|"tasks"|"kanban"|"calendar"|"files"|"messages",
+        "limit": 0-50,
+        "sort": null|"due_date_asc"|"due_date_desc"|"priority_desc"
+      }
+    }
+    """
+    hints = hints or {}
+    names = hints.get("team_member_names", [])
+    me = hints.get("current_user_name", "")
 
-    def interpret_query(query: str, hints: Dict[str, Any] | None = None) -> Dict[str, Any]:
-        """
-        Use the LLM to convert a natural-language question into structured intent.
+    system = """You are a precise intent parser for a project assistant. 
+Output STRICT JSON only. No extra text.
 
-        Returns JSON like:
-        {
-       "action": "query_tasks" | "query_kanban" | "query_files" | "query_profile" | "query_messages" | "general_question",
-        "target_user": {"type": "me"} | {"type": "name", "value": "Sai Prasad"},
-        "time": {"natural": "yesterday", "start": null|"<YYYY-MM-DD>", "end": null|"<YYYY-MM-DD>"},
-        "filters": {
-            "priority": null|"High"|"Medium"|"Low",
-            "status": null|"Open"|"In Progress"|"Done"|"Completed"|"Archived",
-            "due_bucket": null|"overdue"|"today"|"tomorrow"|"this_week"|"next_week"|"this_month",
-            "board": null|"tasks"|"kanban"|"calendar"|"files"|"messages",
-            "limit": 0-50,
-            "sort": null|"due_date_asc"|"due_date_desc"|"priority_desc"
-        }
-        }
-        """
-        import json
-        hints = hints or {}
-        names = hints.get("team_member_names", [])
-        me = hints.get("current_user_name", "")
+FIELDS:
+- action: one of {"query_tasks","query_kanban","query_files","query_profile","query_messages","general_question"}.
+  Choose the best fit from the user question (e.g., "kanban", "board" -> query_kanban;
+  "files","attachments","docs" -> query_files; "profile","email","phone" -> query_profile;
+  "messages","chats","team chat","conversation","recent messages" -> query_messages).
 
-        system = """You are a precise intent parser for a project assistant. 
-    Output STRICT JSON only. No extra text.
+- target_user: {"type":"me"} OR {"type":"name","value":"<full name>"}.
+  Prefer {"type":"me"} for "I/my/me". If multiple people/team -> {"type":"name","value":"TEAM"}.
+  If unsure of a name, pick the closest match from team_member_names.
 
-    FIELDS:
-    - action: one of {"query_tasks","query_kanban","query_files","query_profile","query_messages","general_question"}.
-        Choose the best fit from the user question (e.g., "kanban", "board" -> query_kanban;
-        "files","attachments","docs" -> query_files; "profile","email","phone" -> query_profile;
-        "messages","chats","team chat","conversation","recent messages" -> query_messages).
+- time: { "natural": "<as said>", "start": null|YYYY-MM-DD, "end": null|YYYY-MM-DD }.
+  Do NOT fabricate ISO dates unless clearly stated.
 
-    - target_user: {"type":"me"} OR {"type":"name","value":"<full name>"}.
-    Prefer {"type":"me"} for "I/my/me". If multiple people/team -> {"type":"name","value":"TEAM"}.
-    If unsure of a name, pick the closest match from team_member_names.
-    - time: { "natural": "<as said>", "start": null|YYYY-MM-DD, "end": null|YYYY-MM-DD }.
-    Do NOT fabricate ISO dates unless clearly stated (then fill start/end if obvious).
-    - filters:
-    - priority: Normalize to "High","Medium","Low" if user says high/urgent/critical, medium/normal, low/minor.
-    - status: Normalize to one of "Open","In Progress","Done","Completed","Archived" (map synonyms: 
-                open/todo -> Open; doing/progress/working -> In Progress; done/closed/completed -> Completed; archive/archived -> Archived).
-    - due_bucket: one of overdue/today/tomorrow/this_week/next_week/this_month (infer if user says “overdue”, 
-                    “due today”, “tomorrow”, “this week/next week/this month”).
-    - board: "tasks"|"kanban"|"calendar"|"files"|"messages" if user hints at a specific source; else null.
-    - limit: integer 1..50 if user asks for "top N", "show 5", etc. Default 10 if they say "top" without a number.
-    - sort: "due_date_asc" (soonest first), "due_date_desc", or "priority_desc" if they say "highest priority first".
-    Return valid JSON only."""
+- filters:
+  - priority: Normalize to "High","Medium","Low".
+  - status: Normalize to "Open","In Progress","Done","Completed","Archived".
+  - due_bucket: one of overdue/today/tomorrow/this_week/next_week/this_month.
+  - board: "tasks"|"kanban"|"calendar"|"files"|"messages".
+  - limit: integer 1..50 if user asks for "top N".
+  - sort: "due_date_asc"|"due_date_desc"|"priority_desc".
+Return valid JSON only."""
+    user = f"""Question: {query}
 
-        user = f"""Question: {query}
+current_user_name: {me}
+team_member_names: {json.dumps(names, ensure_ascii=False)}
 
-    current_user_name: {me}
-    team_member_names: {json.dumps(names, ensure_ascii=False)}
+IMPORTANT:
+- Fill every key. Use null for unknown values.
+- If it's general knowledge, set action="general_question".
+Return JSON only."""
+    tmpl = PromptTemplate.from_template("{system}\n{user}")
+    llm = OllamaLLM(model="llama3")
+    raw = llm.invoke(tmpl.format(system=system, user=user)).strip()
 
-    IMPORTANT:
-    - Fill every key shown above. Use null for unknown values.
-    - Be conservative: if not explicitly mentioned, leave time.start/time.end null.
-    - If the user asks general knowledge with no project data, set action="general_question".
-    Return JSON only."""
-        from langchain.prompts import PromptTemplate
-        from langchain_ollama import OllamaLLM
-        tmpl = PromptTemplate.from_template("{system}\n{user}")
-        llm = OllamaLLM(model="llama3")
-        raw = llm.invoke(tmpl.format(system=system, user=user)).strip()
-
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            parsed = {
-                "action": "general_question",
-                "target_user": {"type": "me"},
-                "time": {"natural": "", "start": None, "end": None},
-                "filters": {
-                    "priority": None, "status": None, "due_bucket": None,
-                    "board": None, "limit": None, "sort": None
-                }
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        parsed = {
+            "action": "general_question",
+            "target_user": {"type": "me"},
+            "time": {"natural": "", "start": None, "end": None},
+            "filters": {
+                "priority": None, "status": None, "due_bucket": None,
+                "board": None, "limit": None, "sort": None
             }
-        # ensure keys exist
-        f = parsed.get("filters") or {}
-        parsed["filters"] = {
-            "priority": f.get("priority"),
-            "status": f.get("status"),
-            "due_bucket": f.get("due_bucket"),
-            "board": f.get("board"),
-            "limit": f.get("limit"),
-            "sort": f.get("sort"),
         }
-        return parsed
-
-
+    f = parsed.get("filters") or {}
+    parsed["filters"] = {
+        "priority": f.get("priority"),
+        "status": f.get("status"),
+        "due_bucket": f.get("due_bucket"),
+        "board": f.get("board"),
+        "limit": f.get("limit"),
+        "sort": f.get("sort"),
+    }
+    return parsed
 
 def get_rag_response(query: str, user_context: str = ""):
-
     print("🚨 USING UPDATED CODE VERSION")
     print(f"\n🔍 Incoming query: {query}")
 
@@ -123,6 +109,7 @@ def get_rag_response(query: str, user_context: str = ""):
 
     os.environ["OLLAMA_BASE_URL"] = "http://localhost:11434"
 
+    # lazy imports to avoid startup errors
     from langchain_ollama.embeddings import OllamaEmbeddings
     from langchain_ollama import OllamaLLM
     from langchain_chroma import Chroma
@@ -133,45 +120,34 @@ def get_rag_response(query: str, user_context: str = ""):
     )
 
     docs = vectordb.similarity_search(query, k=3)
-
     if not docs:
         print("⚠️ No documents returned from vector search.")
-        return "⚠️ Sorry, I couldn't find anything relevant in the documents."
-
-    for i, doc in enumerate(docs):
-        print(f"→ Doc {i+1}:\n{doc.page_content[:300]}...\n")
-
-
-    print("🔍 Type of docs[0]:", type(docs[0]))
-    print("🔍 docs[0]:", docs[0])
-    relevant_docs = [doc.page_content for doc in docs]
-
-    if not relevant_docs:
-        return "⚠️ Sorry, I couldn't find anything relevant in the documents."
-
-    doc_context = "\n---\n".join(relevant_docs)
-    context = f"{user_context}\n\n--- DOCUMENT CONTEXT ---\n{doc_context}"
-
+        # still answer from general knowledge (fallback)
+        context = user_context
+    else:
+        for i, doc in enumerate(docs):
+            print(f"→ Doc {i+1}:\n{doc.page_content[:300]}...\n")
+        relevant_docs = [doc.page_content for doc in docs]
+        doc_context = "\n---\n".join(relevant_docs)
+        context = f"{user_context}\n\n--- DOCUMENT CONTEXT ---\n{doc_context}"
 
     prompt_template = PromptTemplate.from_template("""
-        You are a helpful project assistant. Prefer answering from the supplied CONTEXT.
-        If the CONTEXT clearly contains the answer, cite it naturally (e.g., “From Supabase data, ...”).
-        If the CONTEXT is missing or insufficient, still answer from your general knowledge
-        and say briefly that the exact detail wasn't found in context.
+You are a helpful project assistant. Prefer answering from the supplied CONTEXT.
+If the CONTEXT clearly contains the answer, cite it naturally (e.g., “From Supabase data, ...”).
+If the CONTEXT is missing or insufficient, still answer from your general knowledge
+and say briefly that the exact detail wasn't found in context.
 
-        CONTEXT:
-        {context}
+CONTEXT:
+{context}
 
-        QUESTION:
-        {query}
+QUESTION:
+{query}
 
-        Answer:
-        """)
+Answer:
+""")
 
-
-    print("🧠 Combined Context Sent to LLM:\n", context[:500], "...\n")
-
-    final_prompt = prompt_template.format(context=context, query=query)
+    print("🧠 Combined Context Sent to LLM:\n", (context or "")[:500], "...\n")
+    final_prompt = prompt_template.format(context=context or "(no context)", query=query)
 
     try:
         llm = OllamaLLM(model="llama3")
