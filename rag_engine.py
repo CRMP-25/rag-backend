@@ -1,8 +1,10 @@
-from typing import List, Dict
+from typing import List, Dict,Any
 import os
 import time
-import requests
+import requests, json
 from langchain.prompts import PromptTemplate
+from langchain_ollama import OllamaLLM
+
 
 def wait_for_ollama(timeout=30):
     print("⏳ Waiting for Ollama to be ready...")
@@ -17,6 +19,99 @@ def wait_for_ollama(timeout=30):
         time.sleep(1)
     print("❌ Ollama did not start in time.")
     return False
+
+
+
+    def interpret_query(query: str, hints: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        """
+        Use the LLM to convert a natural-language question into structured intent.
+
+        Returns JSON like:
+        {
+       "action": "query_tasks" | "query_kanban" | "query_files" | "query_profile" | "query_messages" | "general_question",
+        "target_user": {"type": "me"} | {"type": "name", "value": "Sai Prasad"},
+        "time": {"natural": "yesterday", "start": null|"<YYYY-MM-DD>", "end": null|"<YYYY-MM-DD>"},
+        "filters": {
+            "priority": null|"High"|"Medium"|"Low",
+            "status": null|"Open"|"In Progress"|"Done"|"Completed"|"Archived",
+            "due_bucket": null|"overdue"|"today"|"tomorrow"|"this_week"|"next_week"|"this_month",
+            "board": null|"tasks"|"kanban"|"calendar"|"files"|"messages",
+            "limit": 0-50,
+            "sort": null|"due_date_asc"|"due_date_desc"|"priority_desc"
+        }
+        }
+        """
+        import json
+        hints = hints or {}
+        names = hints.get("team_member_names", [])
+        me = hints.get("current_user_name", "")
+
+        system = """You are a precise intent parser for a project assistant. 
+    Output STRICT JSON only. No extra text.
+
+    FIELDS:
+    - action: one of {"query_tasks","query_kanban","query_files","query_profile","query_messages","general_question"}.
+        Choose the best fit from the user question (e.g., "kanban", "board" -> query_kanban;
+        "files","attachments","docs" -> query_files; "profile","email","phone" -> query_profile;
+        "messages","chats","team chat","conversation","recent messages" -> query_messages).
+
+    - target_user: {"type":"me"} OR {"type":"name","value":"<full name>"}.
+    Prefer {"type":"me"} for "I/my/me". If multiple people/team -> {"type":"name","value":"TEAM"}.
+    If unsure of a name, pick the closest match from team_member_names.
+    - time: { "natural": "<as said>", "start": null|YYYY-MM-DD, "end": null|YYYY-MM-DD }.
+    Do NOT fabricate ISO dates unless clearly stated (then fill start/end if obvious).
+    - filters:
+    - priority: Normalize to "High","Medium","Low" if user says high/urgent/critical, medium/normal, low/minor.
+    - status: Normalize to one of "Open","In Progress","Done","Completed","Archived" (map synonyms: 
+                open/todo -> Open; doing/progress/working -> In Progress; done/closed/completed -> Completed; archive/archived -> Archived).
+    - due_bucket: one of overdue/today/tomorrow/this_week/next_week/this_month (infer if user says “overdue”, 
+                    “due today”, “tomorrow”, “this week/next week/this month”).
+    - board: "tasks"|"kanban"|"calendar"|"files"|"messages" if user hints at a specific source; else null.
+    - limit: integer 1..50 if user asks for "top N", "show 5", etc. Default 10 if they say "top" without a number.
+    - sort: "due_date_asc" (soonest first), "due_date_desc", or "priority_desc" if they say "highest priority first".
+    Return valid JSON only."""
+
+        user = f"""Question: {query}
+
+    current_user_name: {me}
+    team_member_names: {json.dumps(names, ensure_ascii=False)}
+
+    IMPORTANT:
+    - Fill every key shown above. Use null for unknown values.
+    - Be conservative: if not explicitly mentioned, leave time.start/time.end null.
+    - If the user asks general knowledge with no project data, set action="general_question".
+    Return JSON only."""
+        from langchain.prompts import PromptTemplate
+        from langchain_ollama import OllamaLLM
+        tmpl = PromptTemplate.from_template("{system}\n{user}")
+        llm = OllamaLLM(model="llama3")
+        raw = llm.invoke(tmpl.format(system=system, user=user)).strip()
+
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = {
+                "action": "general_question",
+                "target_user": {"type": "me"},
+                "time": {"natural": "", "start": None, "end": None},
+                "filters": {
+                    "priority": None, "status": None, "due_bucket": None,
+                    "board": None, "limit": None, "sort": None
+                }
+            }
+        # ensure keys exist
+        f = parsed.get("filters") or {}
+        parsed["filters"] = {
+            "priority": f.get("priority"),
+            "status": f.get("status"),
+            "due_bucket": f.get("due_bucket"),
+            "board": f.get("board"),
+            "limit": f.get("limit"),
+            "sort": f.get("sort"),
+        }
+        return parsed
+
+
 
 def get_rag_response(query: str, user_context: str = ""):
 
@@ -59,18 +154,20 @@ def get_rag_response(query: str, user_context: str = ""):
 
 
     prompt_template = PromptTemplate.from_template("""
-            You are a helpful assistant for PMT Pro. Use the context below to answer the user's question.
-            You may refer to either the USER CONTEXT or the DOCUMENT CONTEXT.
+        You are a helpful project assistant. Prefer answering from the supplied CONTEXT.
+        If the CONTEXT clearly contains the answer, cite it naturally (e.g., “From Supabase data, ...”).
+        If the CONTEXT is missing or insufficient, still answer from your general knowledge
+        and say briefly that the exact detail wasn't found in context.
 
-            --- USER CONTEXT ---
-            {context}
+        CONTEXT:
+        {context}
 
-            --- QUESTION ---
-            {query}
+        QUESTION:
+        {query}
 
-            Only answer based on the context above. Do not make up information.
-            If the answer isn't found, say: "I'm sorry, I couldn't find that information in the context provided."
-            """)
+        Answer:
+        """)
+
 
     print("🧠 Combined Context Sent to LLM:\n", context[:500], "...\n")
 

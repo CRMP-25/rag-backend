@@ -1,7 +1,9 @@
 from fastapi import FastAPI, Request
-from rag_engine import get_rag_response
+from rag_engine import get_rag_response, interpret_query
 from fastapi.middleware.cors import CORSMiddleware
 import sys, json
+
+
 
 app = FastAPI()
 
@@ -28,6 +30,22 @@ async def generate_insight(request: Request):
     except Exception as e:
         print("❌ Request failed:", str(e))
         return {"result": "Internal error"}
+    
+
+@app.post("/interpret")
+async def interpret(request: Request):
+    try:
+        body = await request.json()
+        query = body.get("query", "")
+        hints = body.get("hints", {})  # {"current_user_name": "...", "team_member_names": ["...","..."]}
+        result = interpret_query(query, hints)
+        return {"result": result}
+    except Exception as e:
+        print("❌ Interpret failed:", str(e))
+        return {"result": {"action": "general_question", "target_user": {"type": "me"},
+                           "time": {"natural": "", "start": None, "end": None},
+                           "filters": {"priority": None, "status": None}}}
+
 
 if __name__ == "__main__":
     body = json.load(sys.stdin)

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+.env.*
+
+# RAG artifacts
+vector_store/
+*.chroma/
+*.parquet
+
+# Editors/OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Node (if any)
+node_modules/
