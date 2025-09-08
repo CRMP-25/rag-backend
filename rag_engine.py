@@ -150,26 +150,23 @@ def get_rag_response(query: str, user_context: str = ""):
         prompt_template = PromptTemplate.from_template("""
 You are a helpful AI project assistant. The user is asking about their specific tasks and priorities.
 
-PRIORITY: Answer based on the USER'S CURRENT DATA first. This contains their actual tasks, deadlines, and priorities from their project management system.
-
-If the user asks "What task should I complete today?" or similar:
-1. Look at their actual tasks due today or overdue
-2. Consider priority levels and urgency
-3. Give specific, actionable recommendations
-4. Reference their actual task names and due dates
+CRITICAL: The CONTEXT below contains the user's ACTUAL TASK DATA from their project management system. You MUST use this data to answer their question. Do NOT give generic advice about project management tools.
 
 CONTEXT:
 {context}
 
 USER QUESTION: {query}
 
-Instructions:
-- Be specific and practical
-- Reference actual task names and dates when available
-- If no tasks are due today, suggest the next most urgent items
-- Keep the response concise and actionable
+INSTRUCTIONS:
+- Look at the ACTUAL tasks listed in the context above
+- If there are OVERDUE tasks, prioritize those first
+- If there are tasks DUE TODAY, mention those specifically
+- Reference the actual task names and due dates shown
+- Give specific recommendations based on the priority levels shown
+- If no tasks are due today, suggest the most urgent upcoming items
+- Be direct and actionable
 
-Answer:
+Answer based ONLY on the actual task data shown in the context:
 """)
     else:
         prompt_template = PromptTemplate.from_template("""
