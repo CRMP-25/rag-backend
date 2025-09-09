@@ -19,7 +19,9 @@ def wait_for_ollama(timeout=30):
     return False
 
 def parse_user_context(user_context: str) -> Dict[str, Any]:
-    """Enhanced context parsing for both tasks and messages"""
+    """Enhanced context parsing for both tasks and messages with debug info"""
+    
+    print(f"🔍 CONTEXT PARSER - Input length: {len(user_context)}")
     
     parsed_data = {
         # Task data
@@ -41,40 +43,51 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
     }
     
     if not user_context.strip():
+        print("⚠️ CONTEXT PARSER - Empty context received")
         return parsed_data
     
     lines = user_context.split('\n')
     current_section = None
     
-    for line in lines:
+    print(f"📝 CONTEXT PARSER - Processing {len(lines)} lines")
+    
+    for line_num, line in enumerate(lines, 1):
         line = line.strip()
         if not line:
             continue
             
-        # Section identification
+        # Section identification with debug
         if "YOUR ACTIVE TASKS:" in line or "YOUR KANBAN TASKS:" in line:
             current_section = "tasks"
+            print(f"📋 Line {line_num}: Entered TASKS section")
             continue
-        elif "TEAM MESSAGES:" in line:
+        elif "TEAM MESSAGES:" in line or "MESSAGE DATA" in line:
             current_section = "messages"
+            print(f"💬 Line {line_num}: Entered MESSAGES section")
             continue
         elif "TEAM MEMBERS:" in line:
             members_text = line.replace("👥 TEAM MEMBERS:", "").strip()
             parsed_data["team_members"] = [name.strip() for name in members_text.split(",") if name.strip()]
+            print(f"👥 Line {line_num}: Found {len(parsed_data['team_members'])} team members")
             continue
             
         # Parse content based on section
-        if line.startswith("•") or line.startswith("→"):
+        if line.startswith("•") or line.startswith("→") or line.startswith("-"):
             if current_section == "tasks":
                 task_info = parse_task_line(line)
                 if task_info:
                     parsed_data["tasks"]["total_count"] += 1
                     if task_info["urgency"] == "OVERDUE":
                         parsed_data["tasks"]["overdue"].append(task_info)
+                        print(f"🚨 Line {line_num}: Found OVERDUE task: {task_info['task_name']}")
                     elif task_info["urgency"] == "DUE TODAY":
                         parsed_data["tasks"]["today"].append(task_info)
+                        print(f"📅 Line {line_num}: Found TODAY task: {task_info['task_name']}")
                     else:
                         parsed_data["tasks"]["upcoming"].append(task_info)
+                        print(f"📈 Line {line_num}: Found UPCOMING task: {task_info['task_name']}")
+                else:
+                    print(f"⚠️ Line {line_num}: Failed to parse task line: {line[:50]}...")
                         
             elif current_section == "messages":
                 msg_info = parse_message_line(line)
@@ -94,8 +107,21 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
                     if sender not in parsed_data["messages"]["by_sender"]:
                         parsed_data["messages"]["by_sender"][sender] = []
                     parsed_data["messages"]["by_sender"][sender].append(msg_info)
+                    print(f"💬 Line {line_num}: Found message from {sender}")
+                else:
+                    print(f"⚠️ Line {line_num}: Failed to parse message line: {line[:50]}...")
+    
+    # Final summary
+    tasks = parsed_data["tasks"]
+    messages = parsed_data["messages"]
+    print(f"📊 CONTEXT PARSER SUMMARY:")
+    print(f"  Tasks: {tasks['total_count']} total ({len(tasks['overdue'])} overdue, {len(tasks['today'])} today, {len(tasks['upcoming'])} upcoming)")
+    print(f"  Messages: {messages['total_count']} total ({len(messages['today'])} today, {len(messages['yesterday'])} yesterday)")
+    print(f"  Team members: {len(parsed_data['team_members'])}")
     
     return parsed_data
+
+
 
 def parse_task_line(line: str) -> Dict[str, Any]:
     """Parse task line to extract task information"""
@@ -172,12 +198,64 @@ def parse_message_line(line: str) -> Dict[str, Any]:
     return None
 
 def classify_query_type(query: str, team_members: List[str] = None) -> str:
-    """Enhanced query classification"""
+    """Enhanced query classification with better task detection"""
     
     query_lower = query.lower()
     team_members = team_members or []
     
-    # Message indicators
+    # Strong TASK indicators - these should take priority
+    strong_task_patterns = [
+        r"what.*should.*complete",
+        r"what.*should.*do",
+        r"what.*should.*work.*on",
+        r"complete.*today",
+        r"work.*today",
+        r"task.*today",
+        r"what.*task",
+        r"which.*task",
+        r"next.*task",
+        r"priority.*today",
+        r"due.*today",
+        r"finish.*today",
+        r"today.*priority",
+        r"today.*task"
+    ]
+    
+    # Strong MESSAGE indicators
+    strong_message_patterns = [
+        r"did.*get.*message",
+        r"any.*message.*from",
+        r"message.*from.*today",
+        r"got.*any.*message",
+        r"hear.*from",
+        r"said.*anything",
+        r"contact.*me",
+        r"anyone.*message",
+        r"team.*message",
+        r"word.*from"
+    ]
+    
+    # Check strong task patterns first (highest priority)
+    for pattern in strong_task_patterns:
+        if re.search(pattern, query_lower):
+            print(f"🎯 STRONG TASK PATTERN MATCH: {pattern}")
+            return "task_query"
+    
+    # Check strong message patterns
+    for pattern in strong_message_patterns:
+        if re.search(pattern, query_lower):
+            print(f"💬 STRONG MESSAGE PATTERN MATCH: {pattern}")
+            return "message_query"
+    
+    # Task keywords (for weaker matches)
+    task_keywords = [
+        "task", "tasks", "work", "complete", "finish", "priority", 
+        "due", "deadline", "project", "assignment", "todo", "do today",
+        "overdue", "schedule", "kanban", "start", "begin", "working on",
+        "should", "complete today", "work on today"
+    ]
+    
+    # Message keywords (for weaker matches)
     message_keywords = [
         "message", "messages", "chat", "said", "told", "replied", 
         "conversation", "spoke", "mentioned", "contacted", "reached out",
@@ -185,15 +263,7 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
         "text", "texted", "communicate", "communication", "msg", "msgs"
     ]
     
-    # Task indicators  
-    task_keywords = [
-        "task", "tasks", "work", "complete", "finish", "priority", 
-        "due", "deadline", "project", "assignment", "todo", "do today",
-        "overdue", "schedule", "kanban", "start", "begin", "working on",
-        "should", "what should i", "complete today", "work on today"
-    ]
-    
-    # Check for team member mentions
+    # Check for team member mentions (only affects message queries)
     mentions_team_member = False
     for member in team_members:
         member_lower = member.lower()
@@ -204,43 +274,29 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
             mentions_team_member = True
             break
     
-    # Strong message patterns
-    message_patterns = [
-        r"did.*get.*message", r"any.*message.*from", r"message.*from.*today",
-        r"hear.*from", r"said.*anything", r"contact.*me", r"anyone.*message",
-        r"team.*message", r"word.*from", r"got.*any.*message"
-    ]
-    
-    # Strong task patterns
-    task_patterns = [
-        r"what.*should.*do", r"what.*should.*complete", r"what.*should.*work",
-        r"complete.*today", r"work.*today", r"task.*today", r"priority.*today",
-        r"what.*task", r"which.*task", r"next.*task"
-    ]
-    
-    # Check strong patterns first
-    for pattern in message_patterns:
-        if re.search(pattern, query_lower):
-            return "message_query"
-    
-    for pattern in task_patterns:
-        if re.search(pattern, query_lower):
-            return "task_query"
-    
-    # If mentions team member + message keywords
+    # If mentions team member + message keywords -> message query
     if mentions_team_member and any(kw in query_lower for kw in message_keywords):
+        print(f"💬 TEAM MEMBER + MESSAGE KEYWORDS")
         return "message_query"
     
     # Count keyword scores
-    message_score = sum(1 for kw in message_keywords if kw in query_lower)
     task_score = sum(1 for kw in task_keywords if kw in query_lower)
+    message_score = sum(1 for kw in message_keywords if kw in query_lower)
     
-    if message_score > task_score and message_score > 0:
-        return "message_query"
-    elif task_score >= message_score and task_score > 0:
+    print(f"📊 Scores - Task: {task_score}, Message: {message_score}")
+    
+    # Task queries take precedence when scores are equal or task score is higher
+    if task_score >= message_score and task_score > 0:
+        print(f"🎯 CLASSIFIED AS TASK QUERY (score: {task_score})")
         return "task_query"
+    elif message_score > task_score and message_score > 0:
+        print(f"💬 CLASSIFIED AS MESSAGE QUERY (score: {message_score})")
+        return "message_query"
     else:
+        print(f"❓ CLASSIFIED AS GENERAL QUERY")
         return "general_query"
+    
+
 
 def get_rag_response(query: str, user_context: str = ""):
     """Main RAG response function with enhanced task/message handling"""
@@ -257,17 +313,39 @@ def get_rag_response(query: str, user_context: str = ""):
     print(f"📋 Parsed tasks: {parsed_data['tasks']['total_count']}")
     print(f"💬 Parsed messages: {parsed_data['messages']['total_count']}")
     
-    # Classify the query
+    # Classify the query with debug info
     query_type = classify_query_type(query, parsed_data['team_members'])
     print(f"🎯 Query classified as: {query_type}")
     
+    # Force task handling for common task patterns
+    task_indicators = [
+        "what should i complete",
+        "what should i do", 
+        "what should i work on",
+        "complete today",
+        "work today",
+        "task today",
+        "priority today",
+        "due today"
+    ]
+    
+    query_lower = query.lower()
+    if any(indicator in query_lower for indicator in task_indicators):
+        print(f"🎯 FORCING TASK RESPONSE due to strong task indicators")
+        query_type = "task_query"
+    
     # Generate response based on query type
-    if query_type == "message_query":
-        return generate_message_response(query, parsed_data)
-    elif query_type == "task_query":
+    if query_type == "task_query":
+        print("📋 Generating TASK response")
         return generate_task_response(query, parsed_data)
+    elif query_type == "message_query":
+        print("💬 Generating MESSAGE response")  
+        return generate_message_response(query, parsed_data)
     else:
+        print("🤖 Generating GENERAL response")
         return generate_general_response(query, parsed_data, user_context)
+    
+
 
 def generate_task_response(query: str, parsed_data: Dict[str, Any]) -> str:
     """Generate response specifically for task queries"""
@@ -276,28 +354,49 @@ def generate_task_response(query: str, parsed_data: Dict[str, Any]) -> str:
     
     tasks = parsed_data["tasks"]
     
-    # Handle different task scenarios
+    # Log what we found
+    print(f"📊 Task breakdown:")
+    print(f"  - Overdue: {len(tasks['overdue'])}")
+    print(f"  - Due today: {len(tasks['today'])}")
+    print(f"  - Upcoming: {len(tasks['upcoming'])}")
+    print(f"  - Total: {tasks['total_count']}")
+    
+    # Handle different task scenarios with priority order
     if tasks["overdue"]:
+        print("🚨 Handling OVERDUE tasks")
         return handle_overdue_tasks(tasks["overdue"], query)
     elif tasks["today"]:
+        print("📅 Handling TODAY tasks")
         return handle_today_tasks(tasks["today"], query)
     elif tasks["upcoming"]:
+        print("📈 Handling UPCOMING tasks")
         return handle_upcoming_tasks(tasks["upcoming"], query)
     else:
+        print("✅ No tasks found")
         return handle_no_tasks(query)
 
 def handle_overdue_tasks(overdue_tasks: List[Dict], query: str) -> str:
-    """Handle overdue task scenarios"""
+    """Handle overdue task scenarios - HIGHEST PRIORITY"""
     
     count = len(overdue_tasks)
+    print(f"🚨 Processing {count} overdue tasks")
+    
     response_parts = [
         f"🚨 **URGENT: You have {count} overdue task{'s' if count > 1 else ''}!**",
         "",
-        "**❌ Do NOT start new work today until these are resolved:**"
+        "**❌ CRITICAL: Do NOT start new work until these are resolved:**"
     ]
     
+    # Show up to 3 overdue tasks with full details
     for i, task in enumerate(overdue_tasks[:3], 1):
-        response_parts.append(f"{i}. **{task['task_name']}** (Due: {task['due_date']}, Priority: {task['priority']})")
+        task_name = task['task_name']
+        due_date = task['due_date']
+        priority = task['priority']
+        
+        response_parts.append(
+            f"{i}. **{task_name}** (Due: {due_date}, Priority: {priority}) - OVERDUE!"
+        )
+        print(f"  📌 Overdue task {i}: {task_name}")
     
     if count > 3:
         response_parts.append(f"...and {count - 3} more overdue tasks")
@@ -305,9 +404,9 @@ def handle_overdue_tasks(overdue_tasks: List[Dict], query: str) -> str:
     response_parts.extend([
         "",
         "**💡 Immediate Action Required:**",
-        f"Start with: **{overdue_tasks[0]['task_name']}**",
+        f"🎯 **Start immediately with: '{overdue_tasks[0]['task_name']}'**",
         "",
-        "Clear your schedule and focus on catching up!"
+        "📞 Consider notifying stakeholders about delays and clear your schedule to catch up!"
     ])
     
     return "\n".join(response_parts)
@@ -316,56 +415,102 @@ def handle_today_tasks(today_tasks: List[Dict], query: str) -> str:
     """Handle tasks due today"""
     
     count = len(today_tasks)
+    print(f"📅 Processing {count} tasks due today")
+    
     response_parts = [
         f"📅 **You have {count} task{'s' if count > 1 else ''} due TODAY:**",
         ""
     ]
     
+    # Show all today's tasks with priorities
     for i, task in enumerate(today_tasks, 1):
-        response_parts.append(f"{i}. **{task['task_name']}** (Priority: {task['priority']})")
+        task_name = task['task_name']
+        priority = task['priority']
+        
+        priority_emoji = "🔴" if priority == "High" else "🟡" if priority == "Medium" else "🟢"
+        
+        response_parts.append(
+            f"{i}. {priority_emoji} **{task_name}** (Priority: {priority})"
+        )
+        print(f"  📌 Today's task {i}: {task_name} ({priority})")
     
-    response_parts.extend([
-        "",
-        "**💡 Recommendation:** Start with the highest priority task and work systematically through the list."
-    ])
+    # Provide specific recommendations
+    high_priority_tasks = [t for t in today_tasks if t['priority'] == 'High']
+    if high_priority_tasks:
+        response_parts.extend([
+            "",
+            f"**💡 Recommendation:** Start with HIGH priority: **{high_priority_tasks[0]['task_name']}**"
+        ])
+    else:
+        response_parts.extend([
+            "",
+            f"**💡 Recommendation:** Start with: **{today_tasks[0]['task_name']}** and work systematically through the list."
+        ])
     
     return "\n".join(response_parts)
 
 def handle_upcoming_tasks(upcoming_tasks: List[Dict], query: str) -> str:
-    """Handle upcoming tasks"""
+    """Handle upcoming tasks when nothing is due today"""
     
     count = len(upcoming_tasks)
+    print(f"📈 Processing {count} upcoming tasks")
+    
+    # Sort upcoming tasks by due date
+    sorted_tasks = sorted(upcoming_tasks, key=lambda x: x['due_date'] if x['due_date'] != 'No date' else '2999-12-31')
+    
     response_parts = [
-        "✅ **Great news! No tasks due today.**",
+        "✅ **Excellent! No tasks due today.**",
         f"📈 You have {count} upcoming task{'s' if count > 1 else ''}:",
         ""
     ]
     
-    for i, task in enumerate(upcoming_tasks[:5], 1):
-        response_parts.append(f"{i}. **{task['task_name']}** (Due: {task['due_date']}, Priority: {task['priority']})")
+    # Show next 5 upcoming tasks with due dates
+    for i, task in enumerate(sorted_tasks[:5], 1):
+        task_name = task['task_name']
+        due_date = task['due_date']
+        priority = task['priority']
+        
+        response_parts.append(
+            f"{i}. **{task_name}** (Due: {due_date}, Priority: {priority})"
+        )
+        print(f"  📌 Upcoming task {i}: {task_name} (Due: {due_date})")
     
     if count > 5:
-        response_parts.append(f"...and {count - 5} more tasks")
+        response_parts.append(f"...and {count - 5} more upcoming tasks")
     
-    response_parts.extend([
-        "",
-        "**💡 Perfect time to:** Get ahead on upcoming work or focus on professional development!"
-    ])
+    # Suggest next best action
+    next_task = sorted_tasks[0] if sorted_tasks else None
+    if next_task:
+        response_parts.extend([
+            "",
+            f"**💡 Perfect time to get ahead!**",
+            f"🎯 **Consider starting early on: '{next_task['task_name']}' (Due: {next_task['due_date']})**",
+            "",
+            "**Other options:**",
+            "• Focus on professional development",
+            "• Review and organize your workflow", 
+            "• Plan ahead for upcoming projects"
+        ])
     
     return "\n".join(response_parts)
 
 def handle_no_tasks(query: str) -> str:
     """Handle when no tasks are found"""
     
-    return """🎉 **Excellent! No pending tasks found.**
+    print("✅ No tasks found - generating positive response")
+    
+    return """🎉 **Outstanding! No pending tasks found.**
 
 You're completely caught up! This is perfect timing to:
-• Plan ahead for upcoming projects  
-• Focus on professional development
-• Take a well-deserved break
-• Review and organize your workflow
+• 🚀 Plan ahead for upcoming projects  
+• 📚 Focus on professional development
+• 🧘 Take a well-deserved break
+• 🗂️ Review and organize your workflow
+• 💡 Brainstorm new ideas or improvements
 
-Keep up the outstanding work!"""
+**Keep up the excellent work!** You're ahead of schedule and in great shape."""
+
+
 
 def generate_message_response(query: str, parsed_data: Dict[str, Any]) -> str:
     """Generate response specifically for message queries"""
