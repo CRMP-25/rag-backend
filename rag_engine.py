@@ -18,8 +18,8 @@ def wait_for_ollama(timeout=30):
     print("❌ Ollama did not start in time.")
     return False
 
-def parse_task_context(user_context: str) -> Dict[str, Any]:
-    """Parse the user context to extract structured task information"""
+def parse_message_context(user_context: str) -> Dict[str, Any]:
+    """Enhanced parsing of user context to extract both task and message information"""
     
     parsed_data = {
         "overdue_tasks": [],
@@ -27,15 +27,16 @@ def parse_task_context(user_context: str) -> Dict[str, Any]:
         "upcoming_tasks": [],
         "total_tasks": 0,
         "has_urgent_items": False,
-        "messages": [],  # New: parsed messages
-        "message_stats": {}  # New: message statistics
+        "messages": [],
+        "message_stats": {},
+        "team_members": []
     }
     
     if not user_context.strip():
         return parsed_data
     
     # Extract today's date from context
-    today_match = re.search(r"📅 TODAY'S DATE: (\d{1,2}/\d{1,2}/\d{4})", user_context)
+    today_match = re.search(r"📅 TODAY'S DATE: ([^\\n]+)", user_context)
     if today_match:
         today_str = today_match.group(1)
         try:
@@ -59,13 +60,15 @@ def parse_task_context(user_context: str) -> Dict[str, Any]:
             current_section = "active"
         elif "YOUR KANBAN TASKS:" in line:
             current_section = "kanban"
-        elif "YOUR SUBTASKS:" in line:
-            current_section = "subtasks"
-        elif "RECENT MESSAGES:" in line:
+        elif "TEAM MESSAGES:" in line:
             current_section = "messages"
+        elif "TEAM MEMBERS:" in line:
+            # Extract team member names
+            members_text = line.replace("👥 TEAM MEMBERS:", "").strip()
+            parsed_data["team_members"] = [name.strip() for name in members_text.split(",")]
         elif line.startswith("•"):
             if current_section == "messages":
-                # Parse message line: • From John: Hello there (2025-01-15 14:30)
+                # Enhanced message parsing
                 message_info = parse_message_line(line, today)
                 if message_info:
                     parsed_data["messages"].append(message_info)
@@ -90,63 +93,94 @@ def parse_task_context(user_context: str) -> Dict[str, Any]:
     return parsed_data
 
 def parse_message_line(line: str, today_date) -> Dict[str, Any]:
-    """Parse individual message line to extract message information"""
+    """Enhanced message line parsing with better name extraction"""
     
-    # Pattern: • From SenderName: Message content (timestamp)
-    pattern = r"•\s*From\s+([^:]+):\s*([^(]+)\s*\(([^)]+)\)"
+    # Multiple patterns to catch different message formats
+    patterns = [
+        r"From\s+([^(]+?)\s*\((\d+)\s*messages?\).*?Latest\s*\(([^)]+)\):\s*(.+)",  # From Name (X messages) Latest (time): message
+        r"From\s+([^:]+):\s*([^(]+)\s*\(([^)]+)\)",  # From Name: message (time)
+        r"•\s*From\s+([^:]+):\s*(.+)",  # • From Name: message
+    ]
     
-    match = re.search(pattern, line)
-    if not match:
-        # Try alternative pattern without "From"
-        pattern2 = r"•\s*([^:]+):\s*([^(]+)\s*\(([^)]+)\)"
-        match = re.search(pattern2, line)
-        
-    if not match:
-        return None
-    
-    sender_name = match.group(1).strip()
-    message_content = match.group(2).strip()
-    timestamp_str = match.group(3).strip()
-    
-    # Parse timestamp
-    try:
-        # Try different timestamp formats
-        timestamp = None
-        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d", "%m/%d/%Y %H:%M"]:
-            try:
-                timestamp = datetime.strptime(timestamp_str, fmt)
-                break
-            except ValueError:
-                continue
-        
-        if not timestamp:
-            timestamp = datetime.now()
+    for pattern in patterns:
+        match = re.search(pattern, line, re.IGNORECASE)
+        if match:
+            if len(match.groups()) == 4:  # Pattern with message count
+                sender_name = match.group(1).strip()
+                message_count = int(match.group(2)) if match.group(2).isdigit() else 1
+                timestamp_str = match.group(3).strip()
+                message_content = match.group(4).strip()
+            else:  # Simple pattern
+                sender_name = match.group(1).strip()
+                message_content = match.group(2).strip()
+                timestamp_str = match.group(3).strip() if len(match.groups()) >= 3 else "recent"
+                message_count = 1
             
-    except Exception:
-        timestamp = datetime.now()
+            # Parse timestamp
+            timestamp = parse_timestamp(timestamp_str)
+            
+            # Calculate recency
+            recency = calculate_recency(timestamp, today_date)
+            
+            return {
+                "sender_name": sender_name,
+                "message_content": message_content,
+                "timestamp": timestamp,
+                "timestamp_str": timestamp_str,
+                "recency": recency,
+                "message_count": message_count
+            }
     
-    # Calculate recency
-    time_diff = datetime.now() - timestamp
+    return None
+
+def parse_timestamp(timestamp_str: str) -> datetime:
+    """Parse various timestamp formats"""
     
-    if time_diff.days == 0:
-        recency = "today"
-    elif time_diff.days == 1:
-        recency = "yesterday"
-    elif time_diff.days <= 7:
-        recency = "this_week"
+    # Common timestamp formats
+    formats = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M", 
+        "%Y-%m-%d",
+        "%m/%d/%Y %H:%M",
+        "%H:%M",  # Time only
+    ]
+    
+    for fmt in formats:
+        try:
+            if fmt == "%H:%M":
+                # Assume today for time-only format
+                today = datetime.now().date()
+                time_obj = datetime.strptime(timestamp_str, fmt).time()
+                return datetime.combine(today, time_obj)
+            else:
+                return datetime.strptime(timestamp_str, fmt)
+        except ValueError:
+            continue
+    
+    # Fallback to current time
+    return datetime.now()
+
+def calculate_recency(timestamp: datetime, reference_date) -> str:
+    """Calculate message recency relative to reference date"""
+    
+    if isinstance(reference_date, str):
+        reference_date = datetime.strptime(reference_date, "%Y-%m-%d").date()
+    elif hasattr(reference_date, 'date'):
+        reference_date = reference_date.date()
+    
+    message_date = timestamp.date()
+    
+    if message_date == reference_date:
+        return "today"
+    elif message_date == reference_date - timedelta(days=1):
+        return "yesterday"
+    elif (reference_date - message_date).days <= 7:
+        return "this_week"
     else:
-        recency = "older"
-    
-    return {
-        "sender_name": sender_name,
-        "message_content": message_content,
-        "timestamp": timestamp,
-        "timestamp_str": timestamp_str,
-        "recency": recency
-    }
+        return "older"
 
 def calculate_message_stats(messages: List[Dict], today_date) -> Dict[str, Any]:
-    """Calculate message statistics"""
+    """Calculate comprehensive message statistics"""
     
     stats = {
         "total_messages": len(messages),
@@ -154,10 +188,12 @@ def calculate_message_stats(messages: List[Dict], today_date) -> Dict[str, Any]:
         "yesterday_messages": 0,
         "this_week_messages": 0,
         "sender_counts": {},
-        "recent_senders": []
+        "recent_senders": [],
+        "today_senders": []
     }
     
     today_senders = set()
+    all_recent_senders = set()
     
     for msg in messages:
         sender = msg["sender_name"]
@@ -166,18 +202,21 @@ def calculate_message_stats(messages: List[Dict], today_date) -> Dict[str, Any]:
         # Count by sender
         if sender not in stats["sender_counts"]:
             stats["sender_counts"][sender] = 0
-        stats["sender_counts"][sender] += 1
+        stats["sender_counts"][sender] += msg.get("message_count", 1)
+        
+        all_recent_senders.add(sender)
         
         # Count by time period
         if recency == "today":
-            stats["today_messages"] += 1
+            stats["today_messages"] += msg.get("message_count", 1)
             today_senders.add(sender)
         elif recency == "yesterday":
-            stats["yesterday_messages"] += 1
+            stats["yesterday_messages"] += msg.get("message_count", 1)
         elif recency == "this_week":
-            stats["this_week_messages"] += 1
+            stats["this_week_messages"] += msg.get("message_count", 1)
     
-    stats["recent_senders"] = list(today_senders)
+    stats["today_senders"] = list(today_senders)
+    stats["recent_senders"] = list(all_recent_senders)
     
     return stats
 
@@ -189,7 +228,6 @@ def parse_task_line(line: str, today_date) -> Dict[str, Any]:
     
     match = re.search(pattern, line)
     if not match:
-        # Fallback parsing
         return {
             "task_name": line.replace("•", "").strip(),
             "urgency": "Unknown",
@@ -213,8 +251,8 @@ def parse_task_line(line: str, today_date) -> Dict[str, Any]:
     }
 
 def get_rag_response(query: str, user_context: str = ""):
-    """Enhanced RAG response with message and task analysis"""
-    print("🚨 USING ENHANCED RAG ENGINE WITH MESSAGE SUPPORT")
+    """Enhanced RAG response with superior message and task analysis"""
+    print("🔥 ENHANCED RAG ENGINE WITH ADVANCED MESSAGE SUPPORT")
     print(f"\n🔍 Incoming query: {query}")
     print(f"\n📊 User context length: {len(user_context)} characters")
 
@@ -222,61 +260,80 @@ def get_rag_response(query: str, user_context: str = ""):
         return "⚠️ AI backend is temporarily unavailable. Please try again in a moment."
 
     # Parse the user context to understand both tasks and messages
-    parsed_data = parse_task_context(user_context)
+    parsed_data = parse_message_context(user_context)
     
     print(f"📋 Parsed task data: {parsed_data['total_tasks']} total tasks")
     print(f"💬 Parsed message data: {parsed_data['message_stats']['total_messages']} total messages")
     print(f"📧 Today's messages: {parsed_data['message_stats']['today_messages']}")
+    print(f"👥 Team members: {len(parsed_data['team_members'])}")
     
-    # Determine query type
-    query_type = classify_query_type(query)
+    # Determine query type with enhanced classification
+    query_type = classify_query_type(query, parsed_data['team_members'])
     print(f"🎯 Query type classified as: {query_type}")
     
     # Generate appropriate response based on query type
     if query_type == "message_query":
-        return generate_message_response(query, parsed_data, user_context)
+        return generate_message_response(query, parsed_data)
     elif query_type == "task_query":
-        return generate_professional_response(query, parsed_data, user_context)
+        return generate_task_response(query, parsed_data)
     else:
         return generate_mixed_response(query, parsed_data, user_context)
 
-def classify_query_type(query: str) -> str:
-    """Classify the type of query to determine appropriate response"""
+def classify_query_type(query: str, team_members: List[str] = None) -> str:
+    """Enhanced query classification with team member awareness"""
     
     query_lower = query.lower()
+    team_members = team_members or []
     
     # Message-related keywords
     message_keywords = [
         "message", "messages", "chat", "said", "told", "replied", 
         "conversation", "spoke", "mentioned", "contacted", "reached out",
-        "sent", "received", "hear from", "got any", "any word from"
+        "sent", "received", "hear from", "got any", "any word from",
+        "text", "texted", "communicate", "communication"
     ]
     
     # Task-related keywords
     task_keywords = [
         "task", "tasks", "work", "complete", "finish", "priority", 
-        "due", "deadline", "project", "assignment", "todo", "do today"
+        "due", "deadline", "project", "assignment", "todo", "do today",
+        "overdue", "schedule", "kanban"
     ]
     
-    # Check for message queries
-    message_score = sum(1 for keyword in message_keywords if keyword in query_lower)
-    task_score = sum(1 for keyword in task_keywords if keyword in query_lower)
+    # Check for team member names in query
+    mentions_team_member = any(
+        member.lower() in query_lower or 
+        member.split()[0].lower() in query_lower 
+        for member in team_members
+    )
     
-    # Specific message query patterns
+    # Enhanced message query patterns
     message_patterns = [
         r"did.*get.*message",
         r"any.*message.*from",
         r"message.*from.*today",
         r"hear.*from",
         r"said.*anything",
-        r"contact.*me"
+        r"contact.*me",
+        r"anyone.*message",
+        r"team.*message",
+        r"word.*from"
     ]
     
+    # Strong indicators for message queries
     for pattern in message_patterns:
         if re.search(pattern, query_lower):
             return "message_query"
     
-    # Classify based on keyword scores
+    # If mentions team member + message keywords, it's likely a message query
+    if mentions_team_member and any(keyword in query_lower for keyword in message_keywords):
+        return "message_query"
+    
+    # Count keyword scores
+    message_score = sum(1 for keyword in message_keywords if keyword in query_lower)
+    task_score = sum(1 for keyword in task_keywords if keyword in query_lower)
+    
+    # Final classification
     if message_score > task_score and message_score > 0:
         return "message_query"
     elif task_score > message_score and task_score > 0:
@@ -284,15 +341,20 @@ def classify_query_type(query: str) -> str:
     else:
         return "general_query"
 
-def generate_message_response(query: str, parsed_data: Dict[str, Any], context: str) -> str:
-    """Generate response for message-related queries"""
+def generate_message_response(query: str, parsed_data: Dict[str, Any]) -> str:
+    """Generate comprehensive response for message-related queries"""
     
     query_lower = query.lower()
     messages = parsed_data["messages"]
     stats = parsed_data["message_stats"]
+    team_members = parsed_data["team_members"]
     
-    # Extract specific person name from query if mentioned
-    mentioned_person = extract_person_from_query(query)
+    print(f"🔍 Processing message query: {query}")
+    print(f"💬 Available message data: {len(messages)} messages")
+    
+    # Extract specific person name from query
+    mentioned_person = extract_person_from_query(query, team_members)
+    print(f"👤 Mentioned person: {mentioned_person}")
     
     # Handle different types of message queries
     if "today" in query_lower:
@@ -300,25 +362,34 @@ def generate_message_response(query: str, parsed_data: Dict[str, Any], context: 
     elif "yesterday" in query_lower:
         return handle_yesterday_messages_query(messages, stats, mentioned_person)
     elif mentioned_person:
-        return handle_person_specific_messages(messages, mentioned_person)
-    elif "any" in query_lower and "message" in query_lower:
+        return handle_person_specific_messages(messages, mentioned_person, stats)
+    elif any(word in query_lower for word in ["any", "anyone", "team"]) and "message" in query_lower:
         return handle_general_message_check(messages, stats)
     else:
         return handle_general_message_query(messages, stats, query)
 
-def extract_person_from_query(query: str) -> str:
-    """Extract person name from query"""
+def extract_person_from_query(query: str, team_members: List[str]) -> str:
+    """Enhanced person name extraction with team member matching"""
     
     query_lower = query.lower()
     
-    # Common patterns for person mentions
+    # First check for exact team member matches
+    for member in team_members:
+        member_lower = member.lower()
+        first_name = member.split()[0].lower()
+        
+        # Check for full name or first name
+        if member_lower in query_lower or first_name in query_lower:
+            return member
+    
+    # Fallback to pattern-based extraction
     patterns = [
-        r"from\s+(\w+)",
-        r"message.*from\s+(\w+)",
-        r"hear.*from\s+(\w+)",
-        r"(\w+)\s+message",
-        r"did\s+(\w+)\s+",
-        r"has\s+(\w+)\s+"
+        r"from\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)",
+        r"message.*from\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)",
+        r"hear.*from\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)",
+        r"([A-Za-z]+)\s+message",
+        r"did\s+([A-Za-z]+)\s+",
+        r"has\s+([A-Za-z]+)\s+"
     ]
     
     for pattern in patterns:
@@ -326,7 +397,11 @@ def extract_person_from_query(query: str) -> str:
         if match:
             name = match.group(1).title()
             # Filter out common words
-            if name.lower() not in ["any", "get", "got", "have", "has", "did", "the", "a", "an"]:
+            if name.lower() not in ["any", "get", "got", "have", "has", "did", "the", "a", "an", "me", "you"]:
+                # Try to match with team members
+                for member in team_members:
+                    if name.lower() in member.lower():
+                        return member
                 return name
     
     return None
@@ -337,20 +412,25 @@ def handle_today_messages_query(messages: List[Dict], stats: Dict, person: str =
     today_messages = [msg for msg in messages if msg["recency"] == "today"]
     
     if person:
-        person_messages = [msg for msg in today_messages if person.lower() in msg["sender_name"].lower()]
+        person_messages = []
+        for msg in today_messages:
+            if person.lower() in msg["sender_name"].lower():
+                person_messages.append(msg)
         
         if person_messages:
+            total_count = sum(msg.get("message_count", 1) for msg in person_messages)
             response_parts = [
-                f"📧 **Yes, you received {len(person_messages)} message{'s' if len(person_messages) > 1 else ''} from {person} today:**",
+                f"✅ **Yes, you received {total_count} message{'s' if total_count > 1 else ''} from {person} today:**",
                 ""
             ]
             
-            for msg in person_messages[-3:]:  # Show last 3 messages
+            for msg in person_messages[:3]:  # Show first 3 message entries
                 time_str = msg["timestamp"].strftime("%H:%M")
-                response_parts.append(f"🕐 **{time_str}:** {msg['message_content']}")
+                count_str = f"({msg.get('message_count', 1)} messages) " if msg.get('message_count', 1) > 1 else ""
+                response_parts.append(f"🕒 **{time_str}:** {count_str}{msg['message_content']}")
             
             if len(person_messages) > 3:
-                response_parts.append(f"... and {len(person_messages) - 3} more messages")
+                response_parts.append(f"... and {len(person_messages) - 3} more message entries")
                 
         else:
             response_parts = [
@@ -359,27 +439,33 @@ def handle_today_messages_query(messages: List[Dict], stats: Dict, person: str =
             
             if today_messages:
                 other_senders = list(set([msg["sender_name"] for msg in today_messages]))
+                total_today = sum(msg.get("message_count", 1) for msg in today_messages)
                 response_parts.extend([
                     "",
-                    f"📬 You did receive {len(today_messages)} message{'s' if len(today_messages) > 1 else ''} today from: {', '.join(other_senders)}"
+                    f"📬 You did receive {total_today} message{'s' if total_today > 1 else ''} today from: {', '.join(other_senders)}"
                 ])
     else:
         if today_messages:
             sender_counts = {}
             for msg in today_messages:
                 sender = msg["sender_name"]
-                sender_counts[sender] = sender_counts.get(sender, 0) + 1
+                count = msg.get("message_count", 1)
+                sender_counts[sender] = sender_counts.get(sender, 0) + count
             
+            total_today = sum(sender_counts.values())
             response_parts = [
-                f"📧 **You received {len(today_messages)} message{'s' if len(today_messages) > 1 else ''} today:**",
+                f"📧 **You received {total_today} message{'s' if total_today > 1 else ''} today:**",
                 ""
             ]
             
             for sender, count in sender_counts.items():
-                recent_msg = next(msg for msg in reversed(today_messages) if msg["sender_name"] == sender)
+                # Find most recent message from this sender
+                sender_messages = [msg for msg in today_messages if msg["sender_name"] == sender]
+                recent_msg = max(sender_messages, key=lambda x: x["timestamp"])
                 time_str = recent_msg["timestamp"].strftime("%H:%M")
+                
                 response_parts.append(f"👤 **{sender}** ({count} message{'s' if count > 1 else ''})")
-                response_parts.append(f"   Latest ({time_str}): {recent_msg['message_content'][:100]}...")
+                response_parts.append(f"   Latest ({time_str}): {recent_msg['message_content'][:100]}{'...' if len(recent_msg['message_content']) > 100 else ''}")
                 response_parts.append("")
         else:
             response_parts = [
@@ -396,17 +482,21 @@ def handle_yesterday_messages_query(messages: List[Dict], stats: Dict, person: s
     yesterday_messages = [msg for msg in messages if msg["recency"] == "yesterday"]
     
     if person:
-        person_messages = [msg for msg in yesterday_messages if person.lower() in msg["sender_name"].lower()]
+        person_messages = []
+        for msg in yesterday_messages:
+            if person.lower() in msg["sender_name"].lower():
+                person_messages.append(msg)
         
         if person_messages:
+            total_count = sum(msg.get("message_count", 1) for msg in person_messages)
             response_parts = [
-                f"📧 **Yes, you received {len(person_messages)} message{'s' if len(person_messages) > 1 else ''} from {person} yesterday:**",
+                f"✅ **Yes, you received {total_count} message{'s' if total_count > 1 else ''} from {person} yesterday:**",
                 ""
             ]
             
-            for msg in person_messages[-2:]:  # Show last 2 messages
+            for msg in person_messages[:2]:  # Show last 2 messages
                 time_str = msg["timestamp"].strftime("%H:%M")
-                response_parts.append(f"🕐 **{time_str}:** {msg['message_content']}")
+                response_parts.append(f"🕒 **{time_str}:** {msg['message_content']}")
                 
         else:
             response_parts = [
@@ -414,8 +504,9 @@ def handle_yesterday_messages_query(messages: List[Dict], stats: Dict, person: s
             ]
     else:
         if yesterday_messages:
+            total_yesterday = sum(msg.get("message_count", 1) for msg in yesterday_messages)
             response_parts = [
-                f"📧 **You received {len(yesterday_messages)} message{'s' if len(yesterday_messages) > 1 else ''} yesterday.**"
+                f"📧 **You received {total_yesterday} message{'s' if total_yesterday > 1 else ''} yesterday.**"
             ]
         else:
             response_parts = [
@@ -424,10 +515,13 @@ def handle_yesterday_messages_query(messages: List[Dict], stats: Dict, person: s
     
     return "\n".join(response_parts)
 
-def handle_person_specific_messages(messages: List[Dict], person: str) -> str:
+def handle_person_specific_messages(messages: List[Dict], person: str, stats: Dict) -> str:
     """Handle queries about messages from a specific person"""
     
-    person_messages = [msg for msg in messages if person.lower() in msg["sender_name"].lower()]
+    person_messages = []
+    for msg in messages:
+        if person.lower() in msg["sender_name"].lower():
+            person_messages.append(msg)
     
     if person_messages:
         # Group by recency
@@ -441,21 +535,26 @@ def handle_person_specific_messages(messages: List[Dict], person: str) -> str:
         ]
         
         if today_msgs:
-            response_parts.append(f"**Today ({len(today_msgs)} message{'s' if len(today_msgs) > 1 else ''}):**")
-            for msg in today_msgs[-2:]:  # Show last 2 from today
+            today_total = sum(msg.get("message_count", 1) for msg in today_msgs)
+            response_parts.append(f"**Today ({today_total} message{'s' if today_total > 1 else ''}):**")
+            for msg in today_msgs[:2]:  # Show last 2 from today
                 time_str = msg["timestamp"].strftime("%H:%M")
-                response_parts.append(f"🕐 {time_str}: {msg['message_content']}")
+                count_str = f"({msg.get('message_count', 1)} msgs) " if msg.get('message_count', 1) > 1 else ""
+                response_parts.append(f"🕒 {time_str}: {count_str}{msg['message_content']}")
             response_parts.append("")
         
         if yesterday_msgs:
-            response_parts.append(f"**Yesterday ({len(yesterday_msgs)} message{'s' if len(yesterday_msgs) > 1 else ''}):**")
-            latest_yesterday = yesterday_msgs[-1]
-            time_str = latest_yesterday["timestamp"].strftime("%H:%M")
-            response_parts.append(f"🕐 {time_str}: {latest_yesterday['message_content']}")
+            yesterday_total = sum(msg.get("message_count", 1) for msg in yesterday_msgs)
+            response_parts.append(f"**Yesterday ({yesterday_total} message{'s' if yesterday_total > 1 else ''}):**")
+            if yesterday_msgs:
+                latest_yesterday = yesterday_msgs[0]
+                time_str = latest_yesterday["timestamp"].strftime("%H:%M")
+                response_parts.append(f"🕒 {time_str}: {latest_yesterday['message_content']}")
             response_parts.append("")
         
         if this_week_msgs:
-            response_parts.append(f"**This week:** {len(this_week_msgs)} more message{'s' if len(this_week_msgs) > 1 else ''}")
+            week_total = sum(msg.get("message_count", 1) for msg in this_week_msgs)
+            response_parts.append(f"**This week:** {week_total} more message{'s' if week_total > 1 else ''}")
     else:
         response_parts = [
             f"❌ **No recent messages from {person}.**",
@@ -478,8 +577,8 @@ def handle_general_message_check(messages: List[Dict], stats: Dict) -> str:
     
     if stats["today_messages"] > 0:
         response_parts.append(f"**Today:** {stats['today_messages']} message{'s' if stats['today_messages'] > 1 else ''}")
-        if stats["recent_senders"]:
-            response_parts.append(f"**From:** {', '.join(stats['recent_senders'])}")
+        if stats["today_senders"]:
+            response_parts.append(f"**From:** {', '.join(stats['today_senders'])}")
         response_parts.append("")
     
     if stats["yesterday_messages"] > 0:
@@ -508,47 +607,40 @@ def handle_general_message_query(messages: List[Dict], stats: Dict, query: str) 
     # Use LLM for complex message queries
     return generate_llm_response(query, f"Messages: {len(messages)} total. Recent activity: {stats}")
 
-# Keep existing task-related functions unchanged
-def generate_professional_response(query: str, task_data: Dict[str, Any], context: str) -> str:
-    """Generate a professional, actionable response based on task analysis"""
+def generate_task_response(query: str, parsed_data: Dict[str, Any]) -> str:
+    """Generate response for task-related queries"""
     
     query_lower = query.lower()
     is_today_query = any(word in query_lower for word in ["today", "now", "current"])
     is_priority_query = any(word in query_lower for word in ["priority", "important", "urgent", "should", "recommend"])
     
     # Case 1: User has overdue tasks - HIGHEST PRIORITY
-    if task_data["overdue_tasks"]:
-        return handle_overdue_tasks_response(task_data, is_today_query)
+    if parsed_data["overdue_tasks"]:
+        return handle_overdue_tasks_response(parsed_data, is_today_query)
     
     # Case 2: User has tasks due today
-    if task_data["today_tasks"]:
-        return handle_today_tasks_response(task_data)
+    if parsed_data["today_tasks"]:
+        return handle_today_tasks_response(parsed_data)
     
     # Case 3: No tasks for today but has upcoming tasks
-    if task_data["upcoming_tasks"]:
-        return handle_upcoming_tasks_response(task_data)
+    if parsed_data["upcoming_tasks"]:
+        return handle_upcoming_tasks_response(parsed_data)
     
     # Case 4: No tasks at all
-    if task_data["total_tasks"] == 0:
+    if parsed_data["total_tasks"] == 0:
         return handle_no_tasks_response()
     
-    # Fallback: Use LLM for complex queries
-    return generate_llm_response(query, context)
+    # Fallback
+    return "I can see your task data but need clarification on what specific information you're looking for."
 
-def generate_mixed_response(query: str, parsed_data: Dict[str, Any], context: str) -> str:
-    """Generate response for queries that might involve both tasks and messages"""
-    
-    return generate_llm_response(query, context)
-
-# Keep all existing task response functions unchanged...
-def handle_overdue_tasks_response(task_data: Dict[str, Any], is_today_query: bool) -> str:
+def handle_overdue_tasks_response(parsed_data: Dict[str, Any], is_today_query: bool) -> str:
     """Handle response when user has overdue tasks"""
     
-    overdue_count = len(task_data["overdue_tasks"])
-    today_count = len(task_data["today_tasks"])
+    overdue_count = len(parsed_data["overdue_tasks"])
+    today_count = len(parsed_data["today_tasks"])
     
-    # Get most critical overdue task (prioritize High priority, then by due date)
-    critical_task = get_most_critical_task(task_data["overdue_tasks"])
+    # Get most critical overdue task
+    critical_task = parsed_data["overdue_tasks"][0] if parsed_data["overdue_tasks"] else None
     
     response_parts = [
         f"🚨 **URGENT ATTENTION REQUIRED**",
@@ -562,33 +654,27 @@ def handle_overdue_tasks_response(task_data: Dict[str, Any], is_today_query: boo
             ""
         ])
     
-    response_parts.extend([
-        "**🎯 IMMEDIATE ACTION REQUIRED:**",
-        f"**Start with: {critical_task['task_name']}**",
-        f"• Originally due: {critical_task['due_date']}",
-        f"• Priority: {critical_task['priority']}",
-        ""
-    ])
+    if critical_task:
+        response_parts.extend([
+            "**🎯 IMMEDIATE ACTION REQUIRED:**",
+            f"**Start with: {critical_task['task_name']}**",
+            f"• Originally due: {critical_task['due_date']}",
+            f"• Priority: {critical_task['priority']}",
+            ""
+        ])
     
     if overdue_count > 1:
         response_parts.extend([
             "**📋 Other overdue tasks to tackle next:**"
         ])
         
-        for task in task_data["overdue_tasks"][1:min(3, overdue_count)]:  # Show next 2
+        for task in parsed_data["overdue_tasks"][1:min(3, overdue_count)]:
             response_parts.append(f"• {task['task_name']} (Due: {task['due_date']}, Priority: {task['priority']})")
         
         if overdue_count > 3:
             response_parts.append(f"• ...and {overdue_count - 3} more overdue items")
         
         response_parts.append("")
-    
-    if today_count > 0:
-        response_parts.extend([
-            f"**⚠️ Additional Pressure:** You also have {today_count} task{'s' if today_count > 1 else ''} due today.",
-            "Focus on clearing overdue items first to prevent further backlog.",
-            ""
-        ])
     
     response_parts.extend([
         "**💡 Recommendation:**",
@@ -600,46 +686,89 @@ def handle_overdue_tasks_response(task_data: Dict[str, Any], is_today_query: boo
     
     return "\n".join(response_parts)
 
-# ... (keep all other existing functions unchanged)
+def handle_today_tasks_response(parsed_data: Dict[str, Any]) -> str:
+    """Handle response for today's tasks"""
+    
+    today_count = len(parsed_data["today_tasks"])
+    
+    response_parts = [
+        f"📅 **You have {today_count} task{'s' if today_count > 1 else ''} due today:**",
+        ""
+    ]
+    
+    for task in parsed_data["today_tasks"]:
+        response_parts.append(f"• **{task['task_name']}** (Priority: {task['priority']})")
+    
+    response_parts.extend([
+        "",
+        "**💡 Recommendation:** Start with the highest priority task and work through them systematically."
+    ])
+    
+    return "\n".join(response_parts)
 
-def get_most_critical_task(tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Get the most critical task based on priority and due date"""
+def handle_upcoming_tasks_response(parsed_data: Dict[str, Any]) -> str:
+    """Handle response for upcoming tasks"""
     
-    if not tasks:
-        return None
+    upcoming_count = len(parsed_data["upcoming_tasks"])
     
-    # Sort by priority (High > Medium > Low) then by due date
-    priority_order = {"High": 0, "Medium": 1, "Low": 2, "Normal": 1}
+    response_parts = [
+        "✅ **No tasks due today.**",
+        f"📈 You have {upcoming_count} upcoming task{'s' if upcoming_count > 1 else ''}:",
+        ""
+    ]
     
-    sorted_tasks = sorted(tasks, key=lambda t: (
-        priority_order.get(t.get("priority", "Normal"), 3),
-        t.get("due_date", "9999-12-31")  # Far future for missing dates
-    ))
+    for task in parsed_data["upcoming_tasks"][:5]:  # Show first 5
+        response_parts.append(f"• **{task['task_name']}** (Due: {task['due_date']}, Priority: {task['priority']})")
     
-    return sorted_tasks[0]
+    if upcoming_count > 5:
+        response_parts.append(f"• ...and {upcoming_count - 5} more tasks")
+    
+    response_parts.extend([
+        "",
+        "**💡 Recommendation:** Great time to get ahead on upcoming work or focus on professional development."
+    ])
+    
+    return "\n".join(response_parts)
+
+def handle_no_tasks_response() -> str:
+    """Handle response when no tasks are found"""
+    
+    return """🎉 **Excellent! No pending tasks found.**
+
+You're all caught up! This is the perfect time to:
+• Plan ahead for upcoming projects
+• Focus on professional development
+• Take a well-deserved break
+
+Keep up the great work!"""
+
+def generate_mixed_response(query: str, parsed_data: Dict[str, Any], context: str) -> str:
+    """Generate response for queries that might involve both tasks and messages"""
+    
+    return generate_llm_response(query, context)
 
 def generate_llm_response(query: str, context: str) -> str:
-    """Fallback to LLM for complex queries"""
+    """Enhanced LLM response with better prompting"""
     
     os.environ["OLLAMA_BASE_URL"] = "http://localhost:11434"
     
     prompt_template = PromptTemplate.from_template("""
-You are a professional project management assistant with access to both task and message data. 
+You are a professional project management assistant analyzing both task and message data for a user.
 
-Based on the user's data, provide specific, actionable responses.
-
-IMPORTANT RULES:
-- For message queries: Answer directly about messages, be specific about senders and timing
-- For task queries: Prioritize overdue tasks, be direct and professional
-- Reference specific names, dates, and content from their data
-- If no relevant data exists, state this clearly
-
-USER'S CURRENT DATA (TASKS AND MESSAGES):
+CONTEXT DATA:
 {context}
 
-USER QUESTION: {query}
+USER QUESTION: "{query}"
 
-Provide a professional, specific response focusing on their actual data:
+IMPORTANT RULES:
+- For message queries: Answer directly about messages with specific names, times, and content
+- For task queries: Prioritize overdue items, be specific about task names and due dates  
+- Reference actual data from the context - don't make up information
+- If no relevant data exists, state this clearly
+- Be professional but conversational
+- Keep responses focused and actionable
+
+Provide a specific, helpful response based on their actual data:
 """)
 
     try:
@@ -656,14 +785,13 @@ Provide a professional, specific response focusing on their actual data:
         print(f"❌ LLM call failed: {e}")
         return "⚠️ Unable to analyze your data right now. Please try again in a moment."
 
-# Keep the existing interpret_query function unchanged
+# Keep existing interpret_query function
 def interpret_query(query: str, hints: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Enhanced query interpretation with better user name resolution"""
     hints = hints or {}
     names = hints.get("team_member_names", [])
     me = hints.get("current_user_name", "")
 
-    # Enhanced user detection
     query_lower = query.lower()
     target_user = {"type": "me"}
     
@@ -673,24 +801,6 @@ def interpret_query(query: str, hints: Dict[str, Any] | None = None) -> Dict[str
             target_user = {"type": "name", "value": name}
             break
     
-    # Check for common name patterns
-    name_patterns = [
-        r'\b(\w+)\s+task',
-        r'(\w+)\'s\s+task',
-        r'for\s+(\w+)',
-        r'about\s+(\w+)'
-    ]
-    
-    for pattern in name_patterns:
-        match = re.search(pattern, query_lower)
-        if match:
-            potential_name = match.group(1).title()
-            # Find closest match in team names
-            for name in names:
-                if potential_name.lower() in name.lower() or name.lower().startswith(potential_name.lower()):
-                    target_user = {"type": "name", "value": name}
-                    break
-
     # Determine action based on query content
     action = "general_question"
     if any(word in query_lower for word in ["message", "messages", "chat", "said", "told"]):
