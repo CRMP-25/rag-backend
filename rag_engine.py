@@ -453,12 +453,13 @@ def generate_task_response(query: str, parsed_data: Dict[str, Any]) -> str:
     print(f"  - Total: {tasks['total_count']}")
     
     # Handle different task scenarios with priority order
-    if tasks["overdue"]:
-        print("🚨 Handling OVERDUE tasks")
-        return handle_overdue_tasks(tasks["overdue"], query)
-    elif tasks["today"]:
+    if tasks["today"]:
         print("📅 Handling TODAY tasks")
         return handle_today_tasks(tasks["today"], query)
+    elif tasks["overdue"]:
+        print("🚨 Handling OVERDUE tasks")
+        return handle_overdue_tasks(tasks["overdue"], query)
+   
     elif tasks["upcoming"]:
         print("📈 Handling UPCOMING tasks")
         return handle_upcoming_tasks(tasks["upcoming"], query)
