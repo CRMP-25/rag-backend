@@ -19,19 +19,21 @@ def wait_for_ollama(timeout=30):
     return False
 
 def parse_user_context(user_context: str) -> Dict[str, Any]:
-    """Enhanced context parsing for both tasks and messages with debug info"""
+    """Enhanced context parsing for both individual and team tasks with debug info"""
     
     print(f"🔍 CONTEXT PARSER - Input length: {len(user_context)}")
     
     parsed_data = {
-        # Task data
+        # Individual task data (existing)
         "tasks": {
             "overdue": [],
             "today": [],
             "upcoming": [],
             "total_count": 0
         },
-        # Message data
+        # Team task data (new)
+        "team_tasks": {},
+        # Message data (existing)
         "messages": {
             "today": [],
             "yesterday": [],
@@ -48,8 +50,9 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
     
     lines = user_context.split('\n')
     current_section = None
+    current_user = None  # For team task parsing
     
-    print(f"📝 CONTEXT PARSER - Processing {len(lines)} lines")
+    print(f"🔍 CONTEXT PARSER - Processing {len(lines)} lines")
     
     for line_num, line in enumerate(lines, 1):
         line = line.strip()
@@ -59,10 +62,27 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
         # Section identification with debug
         if "YOUR ACTIVE TASKS:" in line or "YOUR KANBAN TASKS:" in line:
             current_section = "tasks"
-            print(f"📋 Line {line_num}: Entered TASKS section")
+            current_user = None
+            print(f"📋 Line {line_num}: Entered INDIVIDUAL TASKS section")
+            continue
+        elif "TECH TEAM - ACTIVE TASKS:" in line or "TECH TEAM - KANBAN TASKS:" in line:
+            current_section = "team_tasks"
+            current_user = None
+            print(f"🏢 Line {line_num}: Entered TEAM TASKS section")
+            continue
+        elif "TEAM LEADS - ACTIVE TASKS:" in line or "TEAM LEADS - KANBAN TASKS:" in line:
+            current_section = "team_tasks"
+            current_user = None
+            print(f"👑 Line {line_num}: Entered TEAM LEAD TASKS section")
+            continue
+        elif "MEMBERS - ACTIVE TASKS:" in line or "MEMBERS - KANBAN TASKS:" in line:
+            current_section = "team_tasks"
+            current_user = None
+            print(f"👤 Line {line_num}: Entered MEMBER TASKS section")
             continue
         elif "TEAM MESSAGES:" in line or "MESSAGE DATA" in line:
             current_section = "messages"
+            current_user = None
             print(f"💬 Line {line_num}: Entered MESSAGES section")
             continue
         elif "TEAM MEMBERS:" in line:
@@ -71,9 +91,20 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
             print(f"👥 Line {line_num}: Found {len(parsed_data['team_members'])} team members")
             continue
             
+        # Check for user headers in team task sections (e.g., "👤 John Doe:")
+        if current_section == "team_tasks" and line.startswith("👤"):
+            user_match = re.search(r"👤\s*([^:]+):", line)
+            if user_match:
+                current_user = user_match.group(1).strip()
+                if current_user not in parsed_data["team_tasks"]:
+                    parsed_data["team_tasks"][current_user] = []
+                print(f"👤 Line {line_num}: Found user section for {current_user}")
+                continue
+            
         # Parse content based on section
-        if line.startswith("•") or line.startswith("→") or line.startswith("-"):
+        if line.startswith("•") or line.startswith("→") or line.startswith("-") or line.startswith("  •"):
             if current_section == "tasks":
+                # Individual task parsing (existing logic)
                 task_info = parse_task_line(line)
                 if task_info:
                     parsed_data["tasks"]["total_count"] += 1
@@ -89,7 +120,18 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
                 else:
                     print(f"⚠️ Line {line_num}: Failed to parse task line: {line[:50]}...")
                         
+            elif current_section == "team_tasks" and current_user:
+                # Team task parsing (new logic)
+                task_info = parse_task_line(line)
+                if task_info:
+                    task_info["assigned_to"] = current_user
+                    parsed_data["team_tasks"][current_user].append(task_info)
+                    print(f"🏢 Line {line_num}: Found team task for {current_user}: {task_info['task_name']}")
+                else:
+                    print(f"⚠️ Line {line_num}: Failed to parse team task line: {line[:50]}...")
+                        
             elif current_section == "messages":
+                # Message parsing (existing logic)
                 msg_info = parse_message_line(line)
                 if msg_info:
                     parsed_data["messages"]["total_count"] += 1
@@ -113,13 +155,20 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
     
     # Final summary
     tasks = parsed_data["tasks"]
+    team_tasks = parsed_data["team_tasks"]
     messages = parsed_data["messages"]
+    
+    team_task_count = sum(len(user_tasks) for user_tasks in team_tasks.values())
+    team_users_count = len(team_tasks)
+    
     print(f"📊 CONTEXT PARSER SUMMARY:")
-    print(f"  Tasks: {tasks['total_count']} total ({len(tasks['overdue'])} overdue, {len(tasks['today'])} today, {len(tasks['upcoming'])} upcoming)")
+    print(f"  Individual Tasks: {tasks['total_count']} total ({len(tasks['overdue'])} overdue, {len(tasks['today'])} today, {len(tasks['upcoming'])} upcoming)")
+    print(f"  Team Tasks: {team_task_count} total across {team_users_count} team members")
     print(f"  Messages: {messages['total_count']} total ({len(messages['today'])} today, {len(messages['yesterday'])} yesterday)")
     print(f"  Team members: {len(parsed_data['team_members'])}")
     
     return parsed_data
+
 
 
 
@@ -198,12 +247,33 @@ def parse_message_line(line: str) -> Dict[str, Any]:
     return None
 
 def classify_query_type(query: str, team_members: List[str] = None) -> str:
-    """Enhanced query classification with better task detection"""
+    """Enhanced query classification with team and role query detection"""
     
     query_lower = query.lower()
     team_members = team_members or []
     
-    # Strong TASK indicators - these should take priority
+    # NEW: Team-wide task queries - highest priority
+    team_task_patterns = [
+        r"show.*all.*tech.*team.*task",
+        r"all.*tech.*team.*member.*task", 
+        r"tech.*team.*task",
+        r"show.*all.*team.*lead.*task",
+        r"all.*team.*lead.*task",
+        r"team.*lead.*task",
+        r"show.*all.*member.*task",
+        r"all.*member.*task",
+        r"member.*task",
+        r"show.*team.*task",
+        r"team.*member.*task"
+    ]
+    
+    # Check team task patterns first (highest priority)
+    for pattern in team_task_patterns:
+        if re.search(pattern, query_lower):
+            print(f"🏢 TEAM TASK PATTERN MATCH: {pattern}")
+            return "team_task_query"
+    
+    # Strong TASK indicators - these should take priority over general patterns
     strong_task_patterns = [
         r"what.*should.*complete",
         r"what.*should.*do",
@@ -218,7 +288,9 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
         r"due.*today",
         r"finish.*today",
         r"today.*priority",
-        r"today.*task"
+        r"today.*task",
+        r"overdue.*task",
+        r"my.*task"
     ]
     
     # Strong MESSAGE indicators
@@ -235,7 +307,7 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
         r"word.*from"
     ]
     
-    # Check strong task patterns first (highest priority)
+    # Check strong task patterns 
     for pattern in strong_task_patterns:
         if re.search(pattern, query_lower):
             print(f"🎯 STRONG TASK PATTERN MATCH: {pattern}")
@@ -297,9 +369,11 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
         return "general_query"
     
 
+    
+
 
 def get_rag_response(query: str, user_context: str = ""):
-    """Main RAG response function with enhanced task/message handling"""
+    """Main RAG response function with enhanced team task handling"""
     
     print(f"🔥 ENHANCED RAG ENGINE - Processing query: {query}")
     print(f"📊 Context length: {len(user_context)} characters")
@@ -329,13 +403,30 @@ def get_rag_response(query: str, user_context: str = ""):
         "due today"
     ]
     
+    # Force team task handling for team patterns
+    team_task_indicators = [
+        "show all tech team",
+        "all tech team members task",
+        "tech team task",
+        "show all team lead",
+        "all team lead task",
+        "show all member",
+        "all member task"
+    ]
+    
     query_lower = query.lower()
     if any(indicator in query_lower for indicator in task_indicators):
         print(f"🎯 FORCING TASK RESPONSE due to strong task indicators")
         query_type = "task_query"
+    elif any(indicator in query_lower for indicator in team_task_indicators):
+        print(f"🏢 FORCING TEAM TASK RESPONSE due to team task indicators")
+        query_type = "team_task_query"
     
     # Generate response based on query type
-    if query_type == "task_query":
+    if query_type == "team_task_query":
+        print("🏢 Generating TEAM TASK response")
+        return generate_team_task_response(query, parsed_data)
+    elif query_type == "task_query":
         print("📋 Generating TASK response")
         return generate_task_response(query, parsed_data)
     elif query_type == "message_query":
@@ -448,6 +539,222 @@ def handle_today_tasks(today_tasks: List[Dict], query: str) -> str:
         ])
     
     return "\n".join(response_parts)
+
+def generate_team_task_response(query: str, parsed_data: Dict[str, Any]) -> str:
+    """Generate response specifically for team task queries"""
+    
+    print("🏢 Generating TEAM TASK response")
+    
+    team_tasks = parsed_data.get("team_tasks", {})
+    
+    if not team_tasks:
+        return """🔍 **No Team Task Data Found**
+
+Unable to retrieve team task information. This could be because:
+• No team members have active tasks
+• Database access issue  
+• Team filtering not working properly
+
+**Suggestion:** Check individual user task dashboards directly."""
+    
+    # Analyze query to determine specific focus
+    query_lower = query.lower()
+    is_tech_team_query = "tech team" in query_lower
+    is_lead_query = "team lead" in query_lower or "lead" in query_lower
+    is_member_query = "member" in query_lower and not is_lead_query
+    
+    # Process team task data
+    total_tasks = sum(len(user_tasks) for user_tasks in team_tasks.values())
+    total_users = len(team_tasks)
+    
+    # Categorize all tasks by urgency
+    overdue_tasks = []
+    today_tasks = []
+    upcoming_tasks = []
+    
+    for user_name, user_tasks in team_tasks.items():
+        for task in user_tasks:
+            task_entry = {
+                "user": user_name,
+                "name": task.get("task_name", "Unnamed task"),
+                "due": task.get("due_date", "No due date"),
+                "priority": task.get("priority", "Medium"),
+                "urgency": task.get("urgency", "Later")
+            }
+            
+            if task.get("urgency") == "OVERDUE":
+                overdue_tasks.append(task_entry)
+            elif task.get("urgency") == "DUE TODAY":
+                today_tasks.append(task_entry)
+            else:
+                upcoming_tasks.append(task_entry)
+    
+    # Build response based on query type
+    if is_tech_team_query:
+        title = "🏢 **Tech Team Task Overview**"
+    elif is_lead_query:
+        title = "👑 **Team Lead Task Overview**"
+    elif is_member_query:
+        title = "👤 **Team Member Task Overview**"
+    else:
+        title = "🏢 **Team Task Overview**"
+    
+    response_parts = [
+        f"{title} ({total_tasks} tasks across {total_users} team members)",
+        ""
+    ]
+    
+    # Show overdue tasks first (CRITICAL)
+    if overdue_tasks:
+        response_parts.extend([
+            f"🚨 **CRITICAL - OVERDUE TASKS ({len(overdue_tasks)}):**",
+            ""
+        ])
+        
+        # Group overdue by user for better organization
+        overdue_by_user = {}
+        for task in overdue_tasks:
+            user = task["user"]
+            if user not in overdue_by_user:
+                overdue_by_user[user] = []
+            overdue_by_user[user].append(task)
+        
+        for user, tasks in overdue_by_user.items():
+            response_parts.append(f"**{user}** ({len(tasks)} overdue):")
+            for task in tasks[:3]:  # Show max 3 per user
+                response_parts.append(f"  • {task['name']} (Due: {task['due']}, Priority: {task['priority']})")
+            if len(tasks) > 3:
+                response_parts.append(f"  • ...and {len(tasks) - 3} more overdue tasks")
+            response_parts.append("")
+    
+    # Show today's tasks
+    if today_tasks:
+        response_parts.extend([
+            f"📅 **DUE TODAY ({len(today_tasks)}):**",
+            ""
+        ])
+        
+        # Group today's tasks by user
+        today_by_user = {}
+        for task in today_tasks:
+            user = task["user"]
+            if user not in today_by_user:
+                today_by_user[user] = []
+            today_by_user[user].append(task)
+        
+        for user, tasks in today_by_user.items():
+            response_parts.append(f"**{user}** ({len(tasks)} due today):")
+            for task in tasks[:3]:  # Show max 3 per user
+                response_parts.append(f"  • {task['name']} (Priority: {task['priority']})")
+            if len(tasks) > 3:
+                response_parts.append(f"  • ...and {len(tasks) - 3} more tasks due today")
+            response_parts.append("")
+    
+    # Show upcoming tasks (limited view)
+    if upcoming_tasks:
+        response_parts.extend([
+            f"📈 **UPCOMING TASKS (next 5 by due date):**",
+            ""
+        ])
+        
+        # Sort upcoming by due date
+        upcoming_sorted = sorted(upcoming_tasks, 
+                               key=lambda x: x['due'] if x['due'] != 'No due date' else '2999-12-31')
+        
+        for task in upcoming_sorted[:5]:
+            response_parts.append(f"• **{task['user']}**: {task['name']} (Due: {task['due']}, Priority: {task['priority']})")
+        
+        if len(upcoming_tasks) > 5:
+            response_parts.append(f"...and {len(upcoming_tasks) - 5} more upcoming tasks")
+        response_parts.append("")
+    
+    # Team summary and recommendations
+    response_parts.extend([
+        "**📊 Team Summary:**",
+        f"• Total active tasks: {total_tasks}",
+        f"• Team members with tasks: {total_users}",
+        f"• Overdue tasks: {len(overdue_tasks)}",
+        f"• Due today: {len(today_tasks)}",
+        f"• Upcoming tasks: {len(upcoming_tasks)}",
+        ""
+    ])
+    
+    # Actionable recommendations based on urgency
+    if len(overdue_tasks) > 0:
+        response_parts.extend([
+            "**⚠️ IMMEDIATE ACTION REQUIRED:**",
+            f"Team has {len(overdue_tasks)} overdue tasks across {len(set(task['user'] for task in overdue_tasks))} team members!",
+            "",
+            "**Recommendations:**",
+            "• Schedule urgent team standup to address overdue items",
+            "• Redistribute workload if team members are overwhelmed", 
+            "• Extend deadlines where appropriate and notify stakeholders",
+            "• Identify and remove blockers preventing task completion"
+        ])
+    elif len(today_tasks) > 0:
+        response_parts.extend([
+            "**💡 Today's Focus:**",
+            f"Team has {len(today_tasks)} tasks due today - monitor progress closely.",
+            "",
+            "**Recommendations:**",
+            "• Check in with team members during daily standup",
+            "• Be available to help remove any last-minute blockers", 
+            "• Prepare for potential deadline extensions if needed"
+        ])
+    else:
+        response_parts.extend([
+            "**✅ Excellent Status:**",
+            "Team has no overdue tasks and nothing due today!",
+            "",
+            "**Recommendations:**",
+            "• Great time to plan ahead for upcoming deliverables",
+            "• Consider taking on additional stretch goals",
+            "• Focus on process improvements and team development"
+        ])
+    
+    # If no tasks found at all
+    if total_tasks == 0:
+        return f"""🎉 **{title.replace('**', '').replace('🏢 ', '').replace('👑 ', '').replace('👤 ', '')}**
+
+No active tasks found for the specified team members.
+
+This could mean:
+• All team members are caught up with their work ✅
+• Tasks are managed in a different system
+• Team members haven't been assigned tasks yet
+• Database filtering issue
+
+**Suggestion:** Verify task assignments and check if tasks are in a different status."""
+    
+    return "\n".join(response_parts)
+
+
+def handle_no_team_tasks(query: str) -> str:
+    """Handle when no team tasks are found"""
+    
+    print("✅ No team tasks found - generating informative response")
+    
+    return """🔍 **No Team Task Data Available**
+
+Unable to retrieve team task information for your query.
+
+**Possible reasons:**
+• Team members have no active tasks assigned
+• Tasks may be in "Completed" or "Archived" status  
+• Database connection or filtering issue
+• Team structure not properly configured
+
+**What you can do:**
+• Check individual team member dashboards
+• Verify team assignments in user management
+• Look at completed tasks to see recent activity
+• Contact your system administrator if this seems incorrect
+
+**Try asking:**
+• "Show my tasks today" (for personal tasks)
+• "What should I work on today?" (for personal priorities)
+• "Any messages from the team?" (for team communications)"""
+
 
 def handle_upcoming_tasks(upcoming_tasks: List[Dict], query: str) -> str:
     """Handle upcoming tasks when nothing is due today"""
