@@ -19,18 +19,20 @@ async def generate_insight(request: Request):
     print("📩 /generate-insight endpoint hit")
     try:
         body = await request.json()
-        prompt = body.get("prompt", "")
+        query = body.get("query") or body.get("prompt") or ""
         user_context = body.get("context", "")
 
-        print("📩 Prompt received:\n", prompt)
+        print("📩 Query received:\n", query)
         print(f"📊 Context length: {len(user_context)} characters")
-        
+
+       
+
         # Log context preview for debugging
         if user_context:
             context_preview = user_context[:200] + "..." if len(user_context) > 200 else user_context
             print(f"📄 Context preview: {context_preview}")
         
-        response = get_rag_response(prompt, user_context)
+        response = get_rag_response(query, user_context)
         print(f"✅ Response generated: {len(response)} characters")
         
         return {"result": response}
