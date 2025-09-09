@@ -36,7 +36,7 @@ def parse_message_context(user_context: str) -> Dict[str, Any]:
         return parsed_data
     
     # Extract today's date from context
-    today_match = re.search(r"📅 TODAY'S DATE: ([^\\n]+)", user_context)
+    today_match = re.search(r"📅 TODAY'S DATE: ([^\n]+)", user_context)
     if today_match:
         today_str = today_match.group(1)
         try:
@@ -65,7 +65,7 @@ def parse_message_context(user_context: str) -> Dict[str, Any]:
         elif "TEAM MEMBERS:" in line:
             # Extract team member names
             members_text = line.replace("👥 TEAM MEMBERS:", "").strip()
-            parsed_data["team_members"] = [name.strip() for name in members_text.split(",")]
+            parsed_data["team_members"] = [name.strip() for name in members_text.split(",") if name.strip()]
         elif line.startswith("•"):
             if current_section == "messages":
                 # Enhanced message parsing
@@ -100,6 +100,7 @@ def parse_message_line(line: str, today_date) -> Dict[str, Any]:
         r"From\s+([^(]+?)\s*\((\d+)\s*messages?\).*?Latest\s*\(([^)]+)\):\s*(.+)",  # From Name (X messages) Latest (time): message
         r"From\s+([^:]+):\s*([^(]+)\s*\(([^)]+)\)",  # From Name: message (time)
         r"•\s*From\s+([^:]+):\s*(.+)",  # • From Name: message
+        r"•\s*([^:]+?):\s*(.+)",  # • Name: message (simple format)
     ]
     
     for pattern in patterns:
@@ -285,29 +286,42 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
     query_lower = query.lower()
     team_members = team_members or []
     
-    # Message-related keywords
+    # Message-related keywords - EXPANDED LIST
     message_keywords = [
         "message", "messages", "chat", "said", "told", "replied", 
         "conversation", "spoke", "mentioned", "contacted", "reached out",
         "sent", "received", "hear from", "got any", "any word from",
-        "text", "texted", "communicate", "communication"
+        "text", "texted", "communicate", "communication", "msg", "msgs"
     ]
     
     # Task-related keywords
     task_keywords = [
         "task", "tasks", "work", "complete", "finish", "priority", 
         "due", "deadline", "project", "assignment", "todo", "do today",
-        "overdue", "schedule", "kanban"
+        "overdue", "schedule", "kanban", "start", "begin", "working on"
     ]
     
-    # Check for team member names in query
-    mentions_team_member = any(
-        member.lower() in query_lower or 
-        member.split()[0].lower() in query_lower 
-        for member in team_members
-    )
+    # Check for team member names in query - ENHANCED MATCHING
+    mentions_team_member = False
+    mentioned_member = None
+    for member in team_members:
+        member_lower = member.lower()
+        first_name = member.split()[0].lower()
+        
+        if (member_lower in query_lower or 
+            first_name in query_lower or
+            f"from {first_name}" in query_lower or
+            f"from {member_lower}" in query_lower):
+            mentions_team_member = True
+            mentioned_member = member
+            break
     
-    # Enhanced message query patterns
+    print(f"🔍 Query analysis:")
+    print(f"  - Mentions team member: {mentions_team_member} ({mentioned_member})")
+    print(f"  - Message keywords found: {[k for k in message_keywords if k in query_lower]}")
+    print(f"  - Task keywords found: {[k for k in task_keywords if k in query_lower]}")
+    
+    # Enhanced message query patterns - MORE COMPREHENSIVE
     message_patterns = [
         r"did.*get.*message",
         r"any.*message.*from",
@@ -317,28 +331,58 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
         r"contact.*me",
         r"anyone.*message",
         r"team.*message",
-        r"word.*from"
+        r"word.*from",
+        r"got.*any.*message",
+        r"receive.*message",
+        r"message.*today",
+        r"chat.*with",
+        r"talk.*to",
+        r"spoke.*with"
     ]
     
     # Strong indicators for message queries
     for pattern in message_patterns:
         if re.search(pattern, query_lower):
+            print(f"✅ Message pattern matched: {pattern}")
             return "message_query"
     
-    # If mentions team member + message keywords, it's likely a message query
+    # If mentions team member + any communication terms, it's likely a message query
     if mentions_team_member and any(keyword in query_lower for keyword in message_keywords):
+        print(f"✅ Team member + message keyword = message_query")
         return "message_query"
+    
+    # Strong task indicators
+    task_patterns = [
+        r"what.*should.*do",
+        r"what.*should.*complete",
+        r"what.*should.*work",
+        r"what.*should.*start",
+        r"task.*today",
+        r"work.*today",
+        r"complete.*today",
+        r"priority.*today"
+    ]
+    
+    for pattern in task_patterns:
+        if re.search(pattern, query_lower):
+            print(f"✅ Task pattern matched: {pattern}")
+            return "task_query"
     
     # Count keyword scores
     message_score = sum(1 for keyword in message_keywords if keyword in query_lower)
     task_score = sum(1 for keyword in task_keywords if keyword in query_lower)
     
-    # Final classification
-    if message_score > task_score and message_score > 0:
+    print(f"📊 Scores - Messages: {message_score}, Tasks: {task_score}")
+    
+    # Final classification with bias toward message queries when ambiguous
+    if message_score > 0 and message_score >= task_score:
         return "message_query"
     elif task_score > message_score and task_score > 0:
         return "task_query"
     else:
+        # Default based on context clues
+        if any(word in query_lower for word in ["today", "now", "should", "complete", "do"]):
+            return "task_query"
         return "general_query"
 
 def generate_message_response(query: str, parsed_data: Dict[str, Any]) -> str:
@@ -351,6 +395,7 @@ def generate_message_response(query: str, parsed_data: Dict[str, Any]) -> str:
     
     print(f"🔍 Processing message query: {query}")
     print(f"💬 Available message data: {len(messages)} messages")
+    print(f"📊 Message stats: {stats}")
     
     # Extract specific person name from query
     mentioned_person = extract_person_from_query(query, team_members)
@@ -471,7 +516,7 @@ def handle_today_messages_query(messages: List[Dict], stats: Dict, person: str =
             response_parts = [
                 "❌ **No messages received today.**",
                 "",
-                "📭 Your inbox is empty for today. Check back later or review yesterday's messages."
+                "🔭 Your inbox is empty for today. Check back later or review yesterday's messages."
             ]
     
     return "\n".join(response_parts)
@@ -568,7 +613,7 @@ def handle_general_message_check(messages: List[Dict], stats: Dict) -> str:
     """Handle general 'any messages?' type queries"""
     
     if stats["total_messages"] == 0:
-        return "❌ **No recent messages found.**\n\n📭 Your inbox appears empty. Check your message settings or try refreshing."
+        return "❌ **No recent messages found.**\n\n🔭 Your inbox appears empty. Check your message settings or try refreshing."
     
     response_parts = [
         f"📧 **Message Summary ({stats['total_messages']} total messages):**",
@@ -651,8 +696,8 @@ def handle_overdue_tasks_response(parsed_data: Dict[str, Any], is_today_query: b
     if is_today_query:
         response_parts.extend([
             "**❌ Nothing should be worked on 'today' until overdue items are resolved.**",
-            ""
-        ])
+        ""
+    ])
     
     if critical_task:
         response_parts.extend([
