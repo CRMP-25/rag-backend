@@ -90,6 +90,17 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
             parsed_data["team_members"] = [name.strip() for name in members_text.split(",") if name.strip()]
             print(f"👥 Line {line_num}: Found {len(parsed_data['team_members'])} team members")
             continue
+        elif line.startswith("🚨 OVERDUE TASKS:") or line.startswith("YOUR ACTIVE TASKS:"):
+            current_section = "personal_overdue"
+        # 🔧 ADD THIS BLOCK (right after the existing section checks)
+        elif line.startswith("TEAM TASKS"):
+            # Accepts: "TEAM TASKS (TECH_TEAM):", "TEAM TASKS (ROLE_TEAM_LEAD):",
+            # "TEAM TASKS (ROLE_MEMBER):", etc.
+            current_section = "team_tasks"
+            current_user = None
+            print(f"🏢 Line {line_num}: Entered GENERIC TEAM TASKS section")
+            continue
+
             
         # Check for user headers in team task sections (e.g., "👤 John Doe:")
         if current_section == "team_tasks" and line.startswith("👤"):
