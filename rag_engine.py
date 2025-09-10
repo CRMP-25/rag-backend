@@ -22,6 +22,9 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
     """Enhanced context parsing for both individual and team tasks with debug info"""
     
     print(f"🔍 CONTEXT PARSER - Input length: {len(user_context)}")
+    print(f"🔍 CONTEXT PARSER - Raw context preview:")
+    print(f"First 500 characters: {user_context[:500]}")
+    print("="*50)
     
     parsed_data = {
         # Individual task data (existing)
@@ -188,36 +191,45 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
 
 
 def parse_task_line(line: str) -> Dict[str, Any]:
-    """Parse task line to extract task information - IMPROVED"""
+    """Parse task line to extract task information - FIXED for due dates"""
     
     # Remove bullet points and clean the line
-    clean_line = re.sub(r"^[\s•→-]+", "", line).strip()
-    
-    # Primary pattern: [URGENCY] Task Name (Priority: X, Status: Y, Due: Z)
-    pattern1 = r"\[([^\]]+)\]\s*([^(]+)\s*\([^)]*Priority:\s*([^,)]+)[^)]*(?:Status:\s*([^,)]+)[^)]*)?(?:Due:\s*([^)]+))?[^)]*\)"
-    
-    match = re.search(pattern1, clean_line)
-    if match:
-        urgency = match.group(1).strip()
-        task_name = match.group(2).strip()
-        priority = match.group(3).strip()
-        status = match.group(4).strip() if match.group(4) else "Active"
-        due_date = match.group(5).strip() if match.group(5) else "No date"
-        
+    # Clean header pieces first (keeps nested (...) safe)
+    clean_line = re.sub(r"^[\s•→'-]+", "", line).strip()
+
+    # Grab [URGENCY], task name, and the metadata chunk inside the first (...)
+    mhead = re.search(r"\[([^\]]+)\]\s*([^(]+?)\s*\((.*)\)\s*$", clean_line)
+    if mhead:
+        urgency = mhead.group(1).strip()
+        task_name = mhead.group(2).strip()
+        meta = mhead.group(3)
+
+        # Priority / Status are optional
+        pm = re.search(r"Priority:\s*([^,)\]]+)", meta, re.I)
+        sm = re.search(r"Status:\s*([^,)\]]+)", meta, re.I)
+
+        # Date: capture the plain date even if followed by " (…days overdue)"
+        # accepts 2025-08-01, or common human formats if you add them later
+        dm = re.search(r"Due:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", meta, re.I)
+        due_date_raw = dm.group(1).strip() if dm else None
+
         return {
             "task_name": task_name,
             "urgency": urgency,
-            "priority": priority,
-            "status": status,
-            "due_date": due_date
+            "priority": (pm.group(1).strip() if pm else "Medium"),
+            "status": (sm.group(1).strip() if sm else "Active"),
+            "due_date": (due_date_raw or "No date")
         }
+
+# Fallbacks unchanged below this line (simple patterns) ...
+
     
-    # Fallback pattern: [URGENCY] Task Name
-    pattern2 = r"\[([^\]]+)\]\s*(.+)"
-    match2 = re.search(pattern2, clean_line)
-    if match2:
-        urgency = match2.group(1).strip()
-        task_name = match2.group(2).strip()
+    # Pattern 3: Simple fallback for [URGENCY] Task Name
+    pattern3 = r"\[([^\]]+)\]\s*(.+)"
+    match3 = re.search(pattern3, clean_line)
+    if match3:
+        urgency = match3.group(1).strip()
+        task_name = match3.group(2).strip()
         
         return {
             "task_name": task_name,
@@ -227,7 +239,7 @@ def parse_task_line(line: str) -> Dict[str, Any]:
             "due_date": "No date"
         }
     
-    # Simple fallback: just the task name
+    # Final fallback: just the task name
     if clean_line:
         return {
             "task_name": clean_line,
@@ -238,7 +250,6 @@ def parse_task_line(line: str) -> Dict[str, Any]:
         }
     
     return None
-
 
 # Add this new function to your mascot.js or equivalent Python backend
 
@@ -365,7 +376,11 @@ def determine_task_urgency(task: Dict) -> str:
         from datetime import datetime, date
         
         # Parse due date (adjust format as needed)
-        due_date = datetime.strptime(due_date_str, '%Y-%m-%d').date()
+        m = re.search(r'\d{4}-\d{2}-\d{2}', due_date_str or '')
+        if not m:
+            return "LATER"
+        due_date = datetime.strptime(m.group(0), '%Y-%m-%d').date()
+
         today = date.today()
         
         if due_date < today:
@@ -925,7 +940,8 @@ Unable to retrieve team task information. This could be because:
         
         # Sort upcoming by due date
         upcoming_sorted = sorted(upcoming_tasks, 
-                               key=lambda x: x['due'] if x['due'] != 'No due date' else '2999-12-31')
+                               key=lambda x: x['due'] if x['due'] not in ('No date', 'No due date') else '2999-12-31'
+)
         
         for task in upcoming_sorted[:5]:
             response_parts.append(f"• **{task['user']}**: {task['name']} (Due: {task['due']}, Priority: {task['priority']})")
