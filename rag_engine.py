@@ -89,7 +89,6 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
             print(f"🏢 Line {line_num}: Entered TEAM TASKS section via header: {line}")
             continue
 
-
         elif (re.search(r"(team messages:|message data|recent messages:?)", line, re.I)
             or line.strip().startswith("🧾 Recent Messages")):
             current_section = "messages"
@@ -97,32 +96,24 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
             print(f"💬 Line {line_num}: Entered MESSAGES section")
             continue
 
-
-            
         # Check for user headers in team task sections (e.g., "👤 John Doe:")
-        if current_section != "team_tasks" and line.startswith("👤"):
-            current_section = "team_tasks"
-            current_user = None
-            print(f"🏢 Line {line_num}: Implicitly entered TEAM TASKS section (saw user header)")
-            # no 'continue' here; let the next block set current_user
-
+        # FIXED: This should work regardless of current section
+        if line.startswith("👤"):
+            # If we see a user header, we're definitely in team tasks section
+            if current_section != "team_tasks":
+                current_section = "team_tasks"
+                print(f"🏢 Line {line_num}: Implicitly entered TEAM TASKS section (saw user header)")
+            
             user_match = re.search(r"👤\s*([^:]+):", line)
             if user_match:
                 current_user = user_match.group(1).strip()
                 if current_user not in parsed_data["team_tasks"]:
                     parsed_data["team_tasks"][current_user] = []
-                print(f"👤 Line {line_num}: Found user section for {current_user}")
+                # Add to team members list if not already there
+                if current_user not in parsed_data["team_members"]:
+                    parsed_data["team_members"].append(current_user)
+                print(f"👤 Line {line_num}: Found user section for '{current_user}'")
                 continue
-            # If we're already inside TEAM TASKS, a "👤 Name:" line should (re)select the user
-            if current_section == "team_tasks" and line.startswith("👤"):
-                user_match = re.search(r"👤\s*([^:]+):", line)
-                if user_match:
-                    current_user = user_match.group(1).strip()
-                    if current_user not in parsed_data["team_tasks"]:
-                        parsed_data["team_tasks"][current_user] = []
-                    print(f"👤 Line {line_num}: Found user section for {current_user}")
-                    continue
-
 
         # Parse content based on section
         if line.startswith("•") or line.startswith("→") or line.startswith("-") or line.startswith("  •"):
@@ -149,7 +140,7 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
                 if task_info:
                     task_info["assigned_to"] = current_user
                     parsed_data["team_tasks"][current_user].append(task_info)
-                    print(f"🏢 Line {line_num}: Found team task for {current_user}: {task_info['task_name']}")
+                    print(f"🏢 Line {line_num}: Found team task for '{current_user}': {task_info['task_name']}")
                 else:
                     print(f"⚠️ Line {line_num}: Failed to parse team task line: {line[:50]}...")
                         
@@ -195,37 +186,59 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
 
 
 
+
 def parse_task_line(line: str) -> Dict[str, Any]:
-    """Parse task line to extract task information"""
+    """Parse task line to extract task information - IMPROVED"""
     
-    # Pattern: • [URGENCY] Task Name (Priority: X, Due: Y)
-    pattern = r"[•→]\s*\[([^\]]+)\]\s*([^(]+)\s*\([^)]*Priority:\s*([^,)]+)[^)]*Due:\s*([^)]+)[^)]*\)"
+    # Remove bullet points and clean the line
+    clean_line = re.sub(r"^[\s•→-]+", "", line).strip()
     
-    match = re.search(pattern, line)
-    if not match:
-        # Fallback pattern for simpler format
-        simple_pattern = r"[•→]\s*([^(]+)"
-        simple_match = re.search(simple_pattern, line)
-        if simple_match:
-            return {
-                "task_name": simple_match.group(1).strip(),
-                "urgency": "Unknown",
-                "priority": "Medium",
-                "due_date": "No date"
-            }
-        return None
+    # Primary pattern: [URGENCY] Task Name (Priority: X, Status: Y, Due: Z)
+    pattern1 = r"\[([^\]]+)\]\s*([^(]+)\s*\([^)]*Priority:\s*([^,)]+)[^)]*(?:Status:\s*([^,)]+)[^)]*)?(?:Due:\s*([^)]+))?[^)]*\)"
     
-    urgency = match.group(1).strip()
-    task_name = match.group(2).strip()
-    priority = match.group(3).strip()
-    due_date = match.group(4).strip()
+    match = re.search(pattern1, clean_line)
+    if match:
+        urgency = match.group(1).strip()
+        task_name = match.group(2).strip()
+        priority = match.group(3).strip()
+        status = match.group(4).strip() if match.group(4) else "Active"
+        due_date = match.group(5).strip() if match.group(5) else "No date"
+        
+        return {
+            "task_name": task_name,
+            "urgency": urgency,
+            "priority": priority,
+            "status": status,
+            "due_date": due_date
+        }
     
-    return {
-        "task_name": task_name,
-        "urgency": urgency,
-        "priority": priority,
-        "due_date": due_date
-    }
+    # Fallback pattern: [URGENCY] Task Name
+    pattern2 = r"\[([^\]]+)\]\s*(.+)"
+    match2 = re.search(pattern2, clean_line)
+    if match2:
+        urgency = match2.group(1).strip()
+        task_name = match2.group(2).strip()
+        
+        return {
+            "task_name": task_name,
+            "urgency": urgency,
+            "priority": "Medium",
+            "status": "Active",
+            "due_date": "No date"
+        }
+    
+    # Simple fallback: just the task name
+    if clean_line:
+        return {
+            "task_name": clean_line,
+            "urgency": "Unknown",
+            "priority": "Medium",
+            "status": "Active", 
+            "due_date": "No date"
+        }
+    
+    return None
+
 
 def parse_message_line(line: str) -> Dict[str, Any]:
     """Parse one message bullet into a dict with sender, content, timestamp_str, recency, count."""
