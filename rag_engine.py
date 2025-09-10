@@ -113,7 +113,21 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
                     parsed_data["team_tasks"][current_user] = []
                 print(f"👤 Line {line_num}: Found user section for {current_user}")
                 continue
-            
+            # Check for user headers in team task sections (e.g., "👤 John Doe:")
+            if current_section != "team_tasks" and line.startswith("👤"):
+                current_section = "team_tasks"
+                current_user = None
+                print(f"🏢 Line {line_num}: Implicitly entered TEAM TASKS section (saw user header)")
+                # no 'continue' here; let the next block set current_user
+
+                user_match = re.search(r"👤\s*([^:]+):", line)
+                if user_match:
+                    current_user = user_match.group(1).strip()
+                    if current_user not in parsed_data["team_tasks"]:
+                        parsed_data["team_tasks"][current_user] = []
+                    print(f"👤 Line {line_num}: Found user section for {current_user}")
+                    continue
+
         # Parse content based on section
         if line.startswith("•") or line.startswith("→") or line.startswith("-") or line.startswith("  •"):
             if current_section == "tasks":
