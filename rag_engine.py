@@ -240,6 +240,177 @@ def parse_task_line(line: str) -> Dict[str, Any]:
     return None
 
 
+# Add this new function to your mascot.js or equivalent Python backend
+
+def get_team_members_by_query(query: str, users_data: List[Dict]) -> Dict[str, List[str]]:
+    """
+    Dynamically determine which team members to include based on query
+    Returns dict with team_type and list of user_names
+    """
+    query_lower = query.lower()
+    
+    # Define team mappings - you can expand this
+    team_patterns = {
+        'tech_team': ['tech team', 'technical team', 'engineering team', 'developers', 'dev team'],
+        'management': ['management team', 'managers', 'team leads', 'leadership', 'management'],
+        'intern': ['intern', 'interns', 'trainee', 'trainees'],
+        'qa': ['qa team', 'quality assurance', 'testing team', 'testers'],
+        'design': ['design team', 'designers', 'ui team', 'ux team'],
+        'sales': ['sales team', 'sales', 'business development'],
+        'hr': ['hr team', 'human resources', 'people team']
+    }
+    
+    # Role-based patterns
+    role_patterns = {
+        'admin': ['admin', 'administrator', 'system admin'],
+        'lead': ['lead', 'team lead', 'project lead', 'tech lead'],
+        'senior': ['senior', 'senior developer', 'senior engineer'],
+        'junior': ['junior', 'junior developer', 'junior engineer']
+    }
+    
+    selected_teams = []
+    selected_roles = []
+    
+    # Check for team matches
+    for team_key, patterns in team_patterns.items():
+        if any(pattern in query_lower for pattern in patterns):
+            selected_teams.append(team_key)
+            print(f"🎯 Detected team: {team_key}")
+    
+    # Check for role matches  
+    for role_key, patterns in role_patterns.items():
+        if any(pattern in query_lower for pattern in patterns):
+            selected_roles.append(role_key)
+            print(f"🎯 Detected role: {role_key}")
+    
+    # Filter users based on detected teams and roles
+    filtered_users = []
+    
+    for user in users_data:
+        user_team = user.get('team', '').lower()
+        user_role = user.get('role', '').lower()
+        user_name = user.get('name', '')
+        
+        # Check team match
+        team_match = False
+        if selected_teams:
+            for team in selected_teams:
+                if team == 'tech_team' and any(t in user_team for t in ['tech', 'engineering', 'development']):
+                    team_match = True
+                elif team == 'management' and any(t in user_team for t in ['management', 'admin']):
+                    team_match = True
+                elif team == 'intern' and 'intern' in user_team:
+                    team_match = True
+                elif team == 'qa' and any(t in user_team for t in ['qa', 'quality', 'testing']):
+                    team_match = True
+                elif team == 'design' and any(t in user_team for t in ['design', 'ui', 'ux']):
+                    team_match = True
+                elif team == 'sales' and any(t in user_team for t in ['sales', 'business']):
+                    team_match = True
+                elif team == 'hr' and any(t in user_team for t in ['hr', 'human']):
+                    team_match = True
+        
+        # Check role match
+        role_match = False
+        if selected_roles:
+            for role in selected_roles:
+                if role == 'admin' and 'admin' in user_role:
+                    role_match = True
+                elif role == 'lead' and 'lead' in user_role:
+                    role_match = True
+                elif role == 'senior' and 'senior' in user_role:
+                    role_match = True
+                elif role == 'junior' and 'junior' in user_role:
+                    role_match = True
+        
+        # Include user if they match team OR role criteria
+        if (not selected_teams and not selected_roles) or team_match or role_match:
+            filtered_users.append(user_name)
+            print(f"✅ Including user: {user_name} (Team: {user.get('team')}, Role: {user.get('role')})")
+    
+    return {
+        'team_type': '_'.join(selected_teams + selected_roles) if (selected_teams or selected_roles) else 'all',
+        'users': filtered_users,
+        'detected_teams': selected_teams,
+        'detected_roles': selected_roles
+    }
+
+
+def get_user_tasks_by_name(user_name: str) -> List[Dict]:
+    """
+    Fetch tasks for a specific user by name from database
+    You'll need to implement this based on your database structure
+    """
+    # This is pseudocode - replace with your actual database query
+    try:
+        # Example SQL query (adjust for your database):
+        # SELECT * FROM tasks WHERE assigned_to = user_name AND status != 'completed'
+        
+        # For now, return empty list - you'll implement the actual database call
+        return []
+        
+    except Exception as e:
+        print(f"❌ Error fetching tasks for {user_name}: {e}")
+        return []
+    
+def determine_task_urgency(task: Dict) -> str:
+    """
+    Determine task urgency based on due date
+    """
+    due_date_str = task.get('due_date')
+    if not due_date_str or due_date_str == 'No date':
+        return "LATER"
+    
+    try:
+        from datetime import datetime, date
+        
+        # Parse due date (adjust format as needed)
+        due_date = datetime.strptime(due_date_str, '%Y-%m-%d').date()
+        today = date.today()
+        
+        if due_date < today:
+            return "OVERDUE"
+        elif due_date == today:
+            return "DUE TODAY"
+        else:
+            return "UPCOMING"
+            
+    except Exception:
+        return "LATER"
+
+
+def build_dynamic_team_context(current_user_id: str, target_info: Dict) -> str:
+    """
+    Build context for dynamically determined team members
+    """
+    team_type = target_info.get('team_type', 'all')
+    target_users = target_info.get('users', [])
+    
+    if not target_users:
+        return f"TEAM TASKS ({team_type.upper()}): No users found matching the criteria.\n\n"
+    
+    context_parts = [f"TEAM TASKS ({team_type.upper()}):"]
+    context_parts.append("")
+    
+    # Get tasks for each target user
+    for user_name in target_users:
+        # You'll need to implement get_user_tasks_by_name function
+        user_tasks = get_user_tasks_by_name(user_name)  # This function needs to be implemented
+        
+        if user_tasks:
+            context_parts.append(f"👤 {user_name}:")
+            for task in user_tasks:
+                # Format task line
+                urgency = determine_task_urgency(task)  # You'll need this function too
+                task_line = f"  • [{urgency}] {task['name']} (Priority: {task.get('priority', 'Medium')}, Status: {task.get('status', 'Active')}, Due: {task.get('due_date', 'No date')})"
+                context_parts.append(task_line)
+            context_parts.append("")
+        else:
+            context_parts.append(f"👤 {user_name}: No active tasks")
+            context_parts.append("")
+    
+    return "\n".join(context_parts)
+
 def parse_message_line(line: str) -> Dict[str, Any]:
     """Parse one message bullet into a dict with sender, content, timestamp_str, recency, count."""
 
@@ -328,18 +499,31 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
     team_members = team_members or []
     
     # NEW: Team-wide task queries - highest priority
+    # Dynamic team task patterns - much more flexible now
     team_task_patterns = [
-        r"show.*all.*tech.*team.*task",
-        r"all.*tech.*team.*member.*task", 
-        r"tech.*team.*task",
-        r"show.*all.*team.*lead.*task",
-        r"all.*team.*lead.*task",
-        r"team.*lead.*task",
-        r"show.*all.*member.*task",
-        r"all.*member.*task",
-        r"member.*task",
-        r"show.*team.*task",
-        r"team.*member.*task"
+        r"show.*all.*team.*task",
+        r"all.*team.*member.*task", 
+        r"team.*task",
+        r"show.*all.*management.*task",
+        r"management.*team.*task",
+        r"show.*all.*intern.*task",
+        r"intern.*task",
+        r"show.*all.*qa.*task",
+        r"qa.*team.*task",
+        r"show.*all.*design.*task",
+        r"design.*team.*task",
+        r"show.*all.*sales.*task",
+        r"sales.*team.*task",
+        r"show.*all.*hr.*task",
+        r"hr.*team.*task",
+        r"show.*all.*admin.*task",
+        r"admin.*task",
+        r"show.*all.*lead.*task",
+        r"lead.*task",
+        r"show.*all.*senior.*task",
+        r"senior.*task",
+        r"show.*all.*junior.*task",
+        r"junior.*task"
     ]
     
     # Check team task patterns first (highest priority)
@@ -347,6 +531,7 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
         if re.search(pattern, query_lower):
             print(f"🏢 TEAM TASK PATTERN MATCH: {pattern}")
             return "team_task_query"
+        
     
     # Strong TASK indicators - these should take priority over general patterns
     strong_task_patterns = [
