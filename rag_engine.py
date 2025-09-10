@@ -60,46 +60,28 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
             continue
             
         # Section identification with debug
-        if "YOUR ACTIVE TASKS:" in line or "YOUR KANBAN TASKS:" in line:
+        # ---- FLEXIBLE SECTION DETECTION (accept old + new headers) ----
+        # PERSONAL (individual) task sections
+        if (
+            "YOUR ACTIVE TASKS:" in line or
+            "YOUR KANBAN TASKS:" in line or
+            line.startswith("🚨 OVERDUE TASKS:") or
+            line.startswith("📅 DUE TODAY:") or
+            line.startswith("📆 DUE TOMORROW:") or
+            line.startswith("📅 THIS WEEK:")
+        ):
             current_section = "tasks"
             current_user = None
-            print(f"📋 Line {line_num}: Entered INDIVIDUAL TASKS section")
+            print(f"📋 Line {line_num}: Entered PERSONAL TASKS section via header: {line}")
             continue
-        elif "TECH TEAM - ACTIVE TASKS:" in line or "TECH TEAM - KANBAN TASKS:" in line:
-            current_section = "team_tasks"
-            current_user = None
-            print(f"🏢 Line {line_num}: Entered TEAM TASKS section")
-            continue
-        elif "TEAM LEADS - ACTIVE TASKS:" in line or "TEAM LEADS - KANBAN TASKS:" in line:
-            current_section = "team_tasks"
-            current_user = None
-            print(f"👑 Line {line_num}: Entered TEAM LEAD TASKS section")
-            continue
-        elif "MEMBERS - ACTIVE TASKS:" in line or "MEMBERS - KANBAN TASKS:" in line:
-            current_section = "team_tasks"
-            current_user = None
-            print(f"👤 Line {line_num}: Entered MEMBER TASKS section")
-            continue
-        elif "TEAM MESSAGES:" in line or "MESSAGE DATA" in line:
+
+        elif (re.search(r"(team messages:|message data|recent messages:?)", line, re.I)
+            or line.strip().startswith("🧾 Recent Messages")):
             current_section = "messages"
             current_user = None
             print(f"💬 Line {line_num}: Entered MESSAGES section")
             continue
-        elif "TEAM MEMBERS:" in line:
-            members_text = line.replace("👥 TEAM MEMBERS:", "").strip()
-            parsed_data["team_members"] = [name.strip() for name in members_text.split(",") if name.strip()]
-            print(f"👥 Line {line_num}: Found {len(parsed_data['team_members'])} team members")
-            continue
-        elif line.startswith("🚨 OVERDUE TASKS:") or line.startswith("YOUR ACTIVE TASKS:"):
-            current_section = "personal_overdue"
-        # 🔧 ADD THIS BLOCK (right after the existing section checks)
-        elif line.startswith("TEAM TASKS"):
-            # Accepts: "TEAM TASKS (TECH_TEAM):", "TEAM TASKS (ROLE_TEAM_LEAD):",
-            # "TEAM TASKS (ROLE_MEMBER):", etc.
-            current_section = "team_tasks"
-            current_user = None
-            print(f"🏢 Line {line_num}: Entered GENERIC TEAM TASKS section")
-            continue
+
 
             
         # Check for user headers in team task sections (e.g., "👤 John Doe:")
@@ -216,46 +198,85 @@ def parse_task_line(line: str) -> Dict[str, Any]:
     }
 
 def parse_message_line(line: str) -> Dict[str, Any]:
-    """Parse message line to extract message information"""
-    
-    # Multiple patterns for different message formats
+    """Parse one message bullet into a dict with sender, content, timestamp_str, recency, count."""
+
+    # Multiple formats your context can emit
     patterns = [
+        # e.g. "From John Doe (3 messages) Latest (2025-09-09 10:22): Fixed issue"
         r"From\s+([^(]+?)\s*\((\d+)\s*messages?\).*?Latest\s*\(([^)]+)\):\s*(.+)",
+
+        # e.g. "From John Doe: Hello there (2025-09-09 10:22)"
         r"From\s+([^:]+):\s*([^(]+)\s*\(([^)]+)\)",
+
+        # e.g. "• From John Doe: Hello there"
         r"[•→]\s*From\s+([^:]+):\s*(.+)",
+
+        # e.g. "• John Doe: Hello there"
         r"[•→]\s*([^:]+?):\s*(.+)"
     ]
-    
+
+    sender_name = None
+    message_content = ""
+    timestamp_str = "recent"
+    message_count = 1
+
     for pattern in patterns:
-        match = re.search(pattern, line, re.IGNORECASE)
-        if match:
-            if len(match.groups()) >= 4:  # Complex pattern
-                sender_name = match.group(1).strip()
-                message_count = int(match.group(2)) if match.group(2).isdigit() else 1
-                timestamp_str = match.group(3).strip()
-                message_content = match.group(4).strip()
-            else:  # Simple pattern
-                sender_name = match.group(1).strip()
-                message_content = match.group(2).strip() if len(match.groups()) >= 2 else ""
-                timestamp_str = match.group(3).strip() if len(match.groups()) >= 3 else "recent"
-                message_count = 1
-            
-            # Determine recency based on context clues
-            recency = "this_week"  # default
-            if "TODAY:" in line or "today" in timestamp_str.lower():
-                recency = "today"
-            elif "YESTERDAY:" in line or "yesterday" in timestamp_str.lower():
-                recency = "yesterday"
-            
-            return {
-                "sender_name": sender_name,
-                "message_content": message_content,
-                "timestamp_str": timestamp_str,
-                "recency": recency,
-                "message_count": message_count
-            }
-    
-    return None
+        m = re.search(pattern, line, re.IGNORECASE)
+        if not m:
+            continue
+
+        if pattern == patterns[0]:  # complex "Latest (...)" form
+            sender_name = m.group(1).strip()
+            message_count = int(m.group(2)) if m.group(2).isdigit() else 1
+            timestamp_str = m.group(3).strip()
+            message_content = m.group(4).strip()
+        elif pattern == patterns[1]:  # "...: text (YYYY-MM-DD ...)"
+            sender_name = m.group(1).strip()
+            message_content = m.group(2).strip()
+            timestamp_str = m.group(3).strip()
+            message_count = 1
+        else:  # simple 2-group forms
+            sender_name = m.group(1).strip()
+            message_content = m.group(2).strip() if len(m.groups()) >= 2 else ""
+            timestamp_str = "recent"
+            message_count = 1
+        break
+
+    if not sender_name:
+        return None
+
+    # --- recency detection ---
+    # Default
+    recency = "this_week"
+
+    # Literal hints
+    if "TODAY:" in line or "today" in (timestamp_str or "").lower():
+        recency = "today"
+    elif "YESTERDAY:" in line or "yesterday" in (timestamp_str or "").lower():
+        recency = "yesterday"
+    else:
+        # Map ISO-like dates in timestamp to today/yesterday
+        try:
+            m = re.search(r"\d{4}-\d{2}-\d{2}", timestamp_str or "")
+            if m:
+                date_part = m.group(0)
+                today_iso = datetime.utcnow().date().isoformat()
+                yest_iso = (datetime.utcnow() - timedelta(days=1)).date().isoformat()
+                if date_part == today_iso:
+                    recency = "today"
+                elif date_part == yest_iso:
+                    recency = "yesterday"
+        except Exception:
+            pass
+
+    return {
+        "sender_name": sender_name,
+        "message_content": message_content,
+        "timestamp_str": timestamp_str,
+        "recency": recency,
+        "message_count": message_count
+    }
+
 
 def classify_query_type(query: str, team_members: List[str] = None) -> str:
     """Enhanced query classification with team and role query detection"""
@@ -455,6 +476,11 @@ def generate_task_response(query: str, parsed_data: Dict[str, Any]) -> str:
     print("🎯 Generating TASK response")
     
     tasks = parsed_data["tasks"]
+    q = (query or "").lower()
+    if any(k in q for k in ["overdue", "past due", "late"]) and tasks["overdue"]:
+        print("🚨 Overdue requested explicitly — showing overdue first")
+        return handle_overdue_tasks(tasks["overdue"], query)
+
     
     # Log what we found
     print(f"📊 Task breakdown:")
