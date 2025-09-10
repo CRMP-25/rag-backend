@@ -75,6 +75,21 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
             print(f"📋 Line {line_num}: Entered PERSONAL TASKS section via header: {line}")
             continue
 
+        elif (
+            "TECH TEAM - ACTIVE TASKS:" in line
+            or "TECH TEAM - KANBAN TASKS:" in line
+            or "TEAM LEADS - ACTIVE TASKS:" in line
+            or "TEAM LEADS - KANBAN TASKS:" in line
+            or "MEMBERS - ACTIVE TASKS:" in line
+            or "MEMBERS - KANBAN TASKS:" in line
+            or re.search(r"^\s*TEAM\s+TASKS\b", line, re.I)   # catches: "TEAM TASKS (TECH_TEAM):", etc.
+        ):
+            current_section = "team_tasks"
+            current_user = None
+            print(f"🏢 Line {line_num}: Entered TEAM TASKS section via header: {line}")
+            continue
+
+
         elif (re.search(r"(team messages:|message data|recent messages:?)", line, re.I)
             or line.strip().startswith("🧾 Recent Messages")):
             current_section = "messages"
@@ -85,7 +100,12 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
 
             
         # Check for user headers in team task sections (e.g., "👤 John Doe:")
-        if current_section == "team_tasks" and line.startswith("👤"):
+        if current_section != "team_tasks" and line.startswith("👤"):
+            current_section = "team_tasks"
+            current_user = None
+            print(f"🏢 Line {line_num}: Implicitly entered TEAM TASKS section (saw user header)")
+            # no 'continue' here; let the next block set current_user
+
             user_match = re.search(r"👤\s*([^:]+):", line)
             if user_match:
                 current_user = user_match.group(1).strip()
