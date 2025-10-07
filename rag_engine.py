@@ -482,24 +482,43 @@ def parse_message_line(line: str) -> Dict[str, Any]:
     recency = "this_week"
 
     # Literal hints
-    if "TODAY:" in line or "today" in (timestamp_str or "").lower():
+    # if "TODAY:" in line or "today" in (timestamp_str or "").lower():
+    #     recency = "today"
+    if "TODAY:" in line or "TODAY:" in line:
         recency = "today"
-    elif "YESTERDAY:" in line or "yesterday" in (timestamp_str or "").lower():
+        print(f"✅ Message marked as TODAY (explicit marker)")
+    elif "YESTERDAY:" in line or "YESTERDAY:" in line:
         recency = "yesterday"
+        print(f"✅ Message marked as YESTERDAY (explicit marker)")
     else:
-        # Map ISO-like dates in timestamp to today/yesterday
+    # 2. Try to parse ISO date from timestamp or line
         try:
-            m = re.search(r"\d{4}-\d{2}-\d{2}", timestamp_str or "")
-            if m:
-                date_part = m.group(0)
+            # Look for ISO date in both timestamp_str and the full line
+            date_match = re.search(r"(\d{4}-\d{2}-\d{2})", timestamp_str or "") or \
+                        re.search(r"(\d{4}-\d{2}-\d{2})", line)
+            
+            if date_match:
+                date_part = date_match.group(1)
                 today_iso = datetime.utcnow().date().isoformat()
                 yest_iso = (datetime.utcnow() - timedelta(days=1)).date().isoformat()
+                
+                print(f"🔍 Comparing dates - Message: {date_part}, Today: {today_iso}")
+                
                 if date_part == today_iso:
                     recency = "today"
+                    print(f"✅ Message classified as TODAY")
                 elif date_part == yest_iso:
                     recency = "yesterday"
-        except Exception:
+                    print(f"✅ Message classified as YESTERDAY")
+                else:
+                    print(f"📅 Message is from this week: {date_part}")
+            else:
+                print(f"⚠️ No date found in: {timestamp_str or line[:50]}")
+        except Exception as e:
+            print(f"❌ Date parsing error: {e}")
             pass
+
+    print(f"📊 Final recency classification: {recency}")
 
     return {
         "sender_name": sender_name,
