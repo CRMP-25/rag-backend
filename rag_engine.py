@@ -3,6 +3,80 @@ import os, time, requests, json, re
 from datetime import datetime, timedelta
 from langchain.prompts import PromptTemplate
 from langchain_ollama import OllamaLLM
+from supabase import create_client, Client
+import os
+from datetime import datetime, timedelta
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")  # use service role on backend
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+
+def resolve_user(name_or_role: str):
+    """
+    Resolves user(s) from 'full_name' or 'role' (lead/member/intern).
+    Returns list of user dicts.
+    """
+    query = supabase.table("users")
+    if name_or_role.lower() in ["lead", "member", "intern"]:
+        data = query.select("*").eq("role", name_or_role.capitalize()).execute()
+    else:
+        data = query.select("*").ilike("full_name", f"%{name_or_role}%").execute()
+    return data.data or []
+
+def fetch_tasks(user_id=None, overdue=False, today=False):
+    q = supabase.table("tasks").select("*")
+    if user_id:
+        q = q.eq("user_id", user_id)
+
+    today_str = datetime.utcnow().date()
+
+    if overdue:
+        q = q.lt("due_date", str(today_str)).eq("is_completed", False)
+    elif today:
+        q = q.eq("due_date", str(today_str))
+
+    res = q.execute()
+    return res.data or []
+
+def fetch_kanban_tasks(user_id=None, role=None, with_attachments=False):
+    q = supabase.table("kanban_tasks").select("*")
+    if user_id:
+        q = q.eq("assigned_to", user_id)
+    if role:
+        users = resolve_user(role)
+        ids = [u["id"] for u in users]
+        if ids:
+            q = q.in_("assigned_to", ids)
+
+    tasks = q.execute().data or []
+
+    if with_attachments:
+        for t in tasks:
+            att = supabase.table("kanban_attachments").select("*").eq("task_id", t["id"]).execute()
+            t["attachments"] = att.data or []
+    return tasks
+
+def fetch_messages(sender=None, team=None, date_filter=None):
+    q = supabase.table("messages").select("*")
+    if sender:
+        users = resolve_user(sender)
+        ids = [u["id"] for u in users]
+        if ids:
+            q = q.in_("sender_id", ids)
+    if team:
+        q = q.eq("team", team)
+
+    today = datetime.utcnow().date()
+    if date_filter == "today":
+        q = q.gte("created_at", str(today))
+    elif date_filter == "yesterday":
+        yest = today - timedelta(days=1)
+        q = q.gte("created_at", str(yest)).lt("created_at", str(today))
+
+    return q.order("created_at", desc=True).limit(20).execute().data or []
+
+
 
 def wait_for_ollama(timeout=30):
     print("⏳ Waiting for Ollama to be ready...")
@@ -647,69 +721,48 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
     
 
 
-def get_rag_response(query: str, user_context: str = ""):
-    """Main RAG response function with enhanced team task handling"""
-    
-    print(f"🔥 ENHANCED RAG ENGINE - Processing query: {query}")
-    print(f"📊 Context length: {len(user_context)} characters")
+def get_rag_response(query: str, context: dict):
+    q = query.lower()
 
-    if not wait_for_ollama():
-        return "⚠️ AI backend is temporarily unavailable. Please try again in a moment."
+    # --- Task queries ---
+    if "overdue task" in q or "pending task" in q:
+        user = resolve_user(context.get("target_user", ""))
+        if user:
+            tasks = fetch_tasks(user_id=user[0]["id"], overdue=True)
+            return {"type": "tasks", "data": tasks}
 
-    # Parse the context
-    parsed_data = parse_user_context(user_context)
-    
-    print(f"📋 Parsed tasks: {parsed_data['tasks']['total_count']}")
-    print(f"💬 Parsed messages: {parsed_data['messages']['total_count']}")
-    
-    # Classify the query with debug info
-    query_type = classify_query_type(query, parsed_data['team_members'])
-    print(f"🎯 Query classified as: {query_type}")
-    
-    # Force task handling for common task patterns
-    task_indicators = [
-        "what should i complete",
-        "what should i do", 
-        "what should i work on",
-        "complete today",
-        "work today",
-        "task today",
-        "priority today",
-        "due today"
-    ]
-    
-    # Force team task handling for team patterns
-    team_task_indicators = [
-        "show all tech team",
-        "all tech team members task",
-        "tech team task",
-        "show all team lead",
-        "all team lead task",
-        "show all member",
-        "all member task"
-    ]
-    
-    query_lower = query.lower()
-    if any(indicator in query_lower for indicator in task_indicators):
-        print(f"🎯 FORCING TASK RESPONSE due to strong task indicators")
-        query_type = "task_query"
-    elif any(indicator in query_lower for indicator in team_task_indicators):
-        print(f"🏢 FORCING TEAM TASK RESPONSE due to team task indicators")
-        query_type = "team_task_query"
-    
-    # Generate response based on query type
-    if query_type == "team_task_query":
-        print("🏢 Generating TEAM TASK response")
-        return generate_team_task_response(query, parsed_data)
-    elif query_type == "task_query":
-        print("📋 Generating TASK response")
-        return generate_task_response(query, parsed_data)
-    elif query_type == "message_query":
-        print("💬 Generating MESSAGE response")  
-        return generate_message_response(query, parsed_data)
-    else:
-        print("🤖 Generating GENERAL response")
-        return generate_general_response(query, parsed_data, user_context)
+    if "today task" in q or "my tasks today" in q:
+        user = resolve_user(context.get("target_user", ""))
+        if user:
+            tasks = fetch_tasks(user_id=user[0]["id"], today=True)
+            return {"type": "tasks", "data": tasks}
+
+    # --- Kanban ---
+    if "kanban" in q or "board" in q or "project" in q:
+        user = resolve_user(context.get("target_user", ""))
+        role = context.get("target_role")
+        tasks = fetch_kanban_tasks(
+            user_id=user[0]["id"] if user else None,
+            role=role,
+            with_attachments=True
+        )
+        return {"type": "kanban", "data": tasks}
+
+    # --- Messages ---
+    if "message" in q or "chat" in q:
+        sender = context.get("target_user")
+        team = context.get("team")
+        if "yesterday" in q:
+            msgs = fetch_messages(sender=sender, team=team, date_filter="yesterday")
+        elif "today" in q:
+            msgs = fetch_messages(sender=sender, team=team, date_filter="today")
+        else:
+            msgs = fetch_messages(sender=sender, team=team)
+        return {"type": "messages", "data": msgs}
+
+    # --- Default Fallback ---
+    return {"type": "general", "data": generate_general_response(query, context)}
+
     
 
 

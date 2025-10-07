@@ -3,6 +3,9 @@ from rag_engine import get_rag_response, interpret_query
 from fastapi.middleware.cors import CORSMiddleware
 import sys, json
 
+
+
+
 app = FastAPI()
 
 # Enable CORS for frontend
@@ -15,33 +18,54 @@ app.add_middleware(
 )
 
 @app.post("/generate-insight")
-async def generate_insight(request: Request):
-    print("📩 /generate-insight endpoint hit")
+async def generate_insight(payload: dict):
+    query = payload.get("query", "")
+    context = payload.get("context", {})
+
     try:
-        body = await request.json()
-        query = body.get("query") or body.get("prompt") or ""
-        user_context = body.get("context", "")
+        rag_result = get_rag_response(query, context)
 
-        print("📩 Query received:\n", query)
-        print(f"📊 Context length: {len(user_context)} characters")
+        # Format based on type
+        if rag_result["type"] == "tasks":
+            tasks = rag_result["data"]
+            if not tasks:
+                text = "No tasks found for this query."
+            else:
+                lines = [f"- {t['task_text']} (Due: {t.get('due_date', 'N/A')})"
+                         for t in tasks]
+                text = f"Here are the tasks I found:\n" + "\n".join(lines)
 
-       
+        elif rag_result["type"] == "kanban":
+            tasks = rag_result["data"]
+            if not tasks:
+                text = "No Kanban tasks found."
+            else:
+                lines = []
+                for t in tasks:
+                    att_str = ""
+                    if t.get("attachments"):
+                        files = [a["file_name"] for a in t["attachments"]]
+                        att_str = f" | Attachments: {', '.join(files)}"
+                    lines.append(f"- {t['task_text']} (Status: {t['status']}, Priority: {t.get('priority','N/A')}){att_str}")
+                text = "Kanban tasks:\n" + "\n".join(lines)
 
-        # Log context preview for debugging
-        if user_context:
-            context_preview = user_context[:200] + "..." if len(user_context) > 200 else user_context
-            print(f"📄 Context preview: {context_preview}")
-        
-        response = get_rag_response(query, user_context)
-        print(f"✅ Response generated: {len(response)} characters")
-        
-        return {"result": response}
-        
+        elif rag_result["type"] == "messages":
+            msgs = rag_result["data"]
+            if not msgs:
+                text = "No messages found."
+            else:
+                lines = [f"[{m['created_at']}] {m['message']}" for m in msgs]
+                text = "Recent messages:\n" + "\n".join(lines)
+
+        else:  # fallback to general
+            text = rag_result["data"]
+
+        return {"result": text, "raw": rag_result}
+
     except Exception as e:
-        print("❌ Request failed:", str(e))
-        import traceback
-        traceback.print_exc()
-        return {"result": "Internal error occurred while processing your request."}
+        return {"error": str(e)}
+
+
 
 @app.post("/interpret")
 async def interpret(request: Request):
