@@ -482,6 +482,7 @@ def parse_message_line(line: str) -> Dict[str, Any]:
             message_content = m.group(2).strip()
             timestamp_str = m.group(3).strip()
             message_count = 1
+        # After line 492 where it says "elif i == 2:"
         elif i == 2:  # ✅ NEW: "• From X: msg (time, date)"
             sender_name = m.group(1).strip()
             message_content = m.group(2).strip()
@@ -1178,7 +1179,7 @@ def generate_date_message_response(query: str, parsed_data: Dict[str, Any]) -> s
     # 🔧 FIXED: Better date extraction with multiple patterns
     target_date = None
     
-    # Pattern 1: "September 6, 2025" or "September 6 2025"
+    # Pattern 1: "October 7, 2025" or "October 7 2025"
     month_match = re.search(r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d+),?\s*(\d{4})?', query_lower)
     
     if month_match:
@@ -1202,7 +1203,7 @@ def generate_date_message_response(query: str, parsed_data: Dict[str, Any]) -> s
         target_date = date_match.group(0)
         print(f"✅ Extracted ISO date: {target_date}")
     
-    # Pattern 3: "9/6/2025" or "9/6/25"
+    # Pattern 3: "10/7/2025" or "10/7/25"
     elif re.search(r'(\d{1,2})/(\d{1,2})/(\d{2,4})', query_lower):
         date_match = re.search(r'(\d{1,2})/(\d{1,2})/(\d{2,4})', query_lower)
         month = date_match.group(1).zfill(2)
@@ -1218,12 +1219,16 @@ def generate_date_message_response(query: str, parsed_data: Dict[str, Any]) -> s
         return """❌ **Couldn't parse the date from your query.**
 
 Try asking like:
-- "Did I get any messages on September 6, 2025?"
-- "Show messages from 2025-09-06"
-- "Messages from 9/6/2025"
+- "Did I get any messages on October 7, 2025?"
+- "Show messages from 2025-10-07"
+- "Messages from 10/7/2025"
 """
     
     print(f"🔍 Searching for messages on: {target_date}")
+    
+    # 🔧 FIXED: Check if query says "on" (specific day) vs "from" (date range)
+    is_specific_day = " on " in query_lower or "messages on" in query_lower
+    is_date_range = " from " in query_lower or "since" in query_lower
     
     # 🔧 FIXED: Search ALL message categories with better date matching
     all_messages = (
@@ -1235,29 +1240,37 @@ Try asking like:
     print(f"📊 Total messages to search: {len(all_messages)}")
     
     # Filter messages for target date
-    date_messages = []
-    for msg in all_messages:
-        # Extract date from timestamp_str or created_at
-        msg_date_str = msg.get("timestamp_str", "")
-        
-        # Try to extract YYYY-MM-DD from various formats
-        date_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', msg_date_str)
-        
-        if date_match:
-            msg_date = date_match.group(0)
-            print(f"  🔍 Comparing: {msg_date} vs {target_date}")
+    if is_specific_day:
+        # ONLY that specific day
+        date_messages = []
+        for msg in all_messages:
+            msg_date_str = msg.get("timestamp_str", "")
+            date_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', msg_date_str)
             
-            if msg_date == target_date:
-                date_messages.append(msg)
-                print(f"    ✅ MATCH! Added message from {msg.get('sender_name')}")
-        else:
-            print(f"  ⚠️ No date found in timestamp: {msg_date_str}")
+            if date_match:
+                msg_date = date_match.group(0)
+                if msg_date == target_date:
+                    date_messages.append(msg)
+                    print(f"  ✅ MATCH! Added message from {msg.get('sender_name')}")
+    else:
+        # FROM that date onwards (date range)
+        date_messages = []
+        for msg in all_messages:
+            msg_date_str = msg.get("timestamp_str", "")
+            date_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', msg_date_str)
+            
+            if date_match:
+                msg_date = date_match.group(0)
+                if msg_date >= target_date:  # All messages from this date forward
+                    date_messages.append(msg)
+                    print(f"  ✅ RANGE MATCH! Added message from {msg.get('sender_name')}")
     
     print(f"📊 Found {len(date_messages)} messages for {target_date}")
     
     if date_messages:
+        date_type = "on" if is_specific_day else "since"
         response_parts = [
-            f"📧 **Messages from {target_date}:**",
+            f"📧 **Messages {date_type} {target_date}:**",
             ""
         ]
         
@@ -1271,9 +1284,16 @@ Try asking like:
             
             response_parts.append(f"• [{time_only}] **{sender}**: {content}")
         
+        # Add summary
+        response_parts.extend([
+            "",
+            f"📊 **Total**: {len(date_messages)} message{'s' if len(date_messages) != 1 else ''}"
+        ])
+        
         return "\n".join(response_parts)
     else:
-        return f"""❌ **No messages found for {target_date}**
+        date_type = "on" if is_specific_day else "since"
+        return f"""❌ **No messages found {date_type} {target_date}**
 
 **Possible reasons:**
 - No messages were sent/received on this date
@@ -1283,7 +1303,7 @@ Try asking like:
 **Try:**
 - Checking a different date
 - Asking "Show all my messages" to see available dates
-- Verifying the date format (September 6, 2025)
+- Verifying the date format (October 7, 2025)
 """
 
 def handle_no_team_tasks(query: str) -> str:
