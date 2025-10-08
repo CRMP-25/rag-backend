@@ -1175,40 +1175,116 @@ def generate_date_message_response(query: str, parsed_data: Dict[str, Any]) -> s
     messages = parsed_data["messages"]
     query_lower = query.lower()
     
-    # Extract date from query
-    date_match = re.search(r'september\s+(\d+),?\s*(\d{4})?', query_lower) or \
-                 re.search(r'(\d{4})-(\d{2})-(\d{2})', query_lower)
+    # 🔧 FIXED: Better date extraction with multiple patterns
+    target_date = None
     
-    if date_match:
-        if 'september' in query_lower:
-            day = date_match.group(1)
-            year = date_match.group(2) or datetime.now().year
-            target_date = f"{year}-09-{day.zfill(2)}"
-        else:
-            target_date = f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}"
-        
-        # Filter messages for that date
-        date_messages = [m for m in (messages["today"] + messages["yesterday"] + messages["this_week"])
-                        if m.get("created_at", "").startswith(target_date)]
-        
-        if date_messages:
-            response_parts = [
-                f"📧 **Messages from {target_date}:**",
-                ""
-            ]
-            
-            for msg in date_messages:
-                time = msg.get("timestamp_str", "Unknown time")
-                sender = msg.get("sender_name", "Unknown")
-                content = msg.get("message_content", "")
-                response_parts.append(f"• [{time}] **{sender}**: {content}")
-            
-            return "\n".join(response_parts)
-        else:
-            return f"❌ **No messages found for {target_date}**\n\nYou may not have received any messages on this date, or they may have been archived."
+    # Pattern 1: "September 6, 2025" or "September 6 2025"
+    month_match = re.search(r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d+),?\s*(\d{4})?', query_lower)
     
-    return "❌ **Couldn't parse the date from your query.**\n\nTry asking like: 'Did I get any messages on September 5, 2025?'"
+    if month_match:
+        month_name = month_match.group(1)
+        day = month_match.group(2).zfill(2)
+        year = month_match.group(3) or str(datetime.now().year)
+        
+        # Convert month name to number
+        month_map = {
+            'january': '01', 'february': '02', 'march': '03', 'april': '04',
+            'may': '05', 'june': '06', 'july': '07', 'august': '08',
+            'september': '09', 'october': '10', 'november': '11', 'december': '12'
+        }
+        month_num = month_map.get(month_name, '01')
+        target_date = f"{year}-{month_num}-{day}"
+        print(f"✅ Extracted date from month name: {target_date}")
+    
+    # Pattern 2: ISO format "2025-09-06"
+    elif re.search(r'(\d{4})-(\d{2})-(\d{2})', query_lower):
+        date_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', query_lower)
+        target_date = date_match.group(0)
+        print(f"✅ Extracted ISO date: {target_date}")
+    
+    # Pattern 3: "9/6/2025" or "9/6/25"
+    elif re.search(r'(\d{1,2})/(\d{1,2})/(\d{2,4})', query_lower):
+        date_match = re.search(r'(\d{1,2})/(\d{1,2})/(\d{2,4})', query_lower)
+        month = date_match.group(1).zfill(2)
+        day = date_match.group(2).zfill(2)
+        year = date_match.group(3)
+        if len(year) == 2:
+            year = "20" + year
+        target_date = f"{year}-{month}-{day}"
+        print(f"✅ Extracted slash date: {target_date}")
+    
+    if not target_date:
+        print("❌ Could not parse date from query")
+        return """❌ **Couldn't parse the date from your query.**
 
+Try asking like:
+- "Did I get any messages on September 6, 2025?"
+- "Show messages from 2025-09-06"
+- "Messages from 9/6/2025"
+"""
+    
+    print(f"🔍 Searching for messages on: {target_date}")
+    
+    # 🔧 FIXED: Search ALL message categories with better date matching
+    all_messages = (
+        messages.get("today", []) + 
+        messages.get("yesterday", []) + 
+        messages.get("this_week", [])
+    )
+    
+    print(f"📊 Total messages to search: {len(all_messages)}")
+    
+    # Filter messages for target date
+    date_messages = []
+    for msg in all_messages:
+        # Extract date from timestamp_str or created_at
+        msg_date_str = msg.get("timestamp_str", "")
+        
+        # Try to extract YYYY-MM-DD from various formats
+        date_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', msg_date_str)
+        
+        if date_match:
+            msg_date = date_match.group(0)
+            print(f"  🔍 Comparing: {msg_date} vs {target_date}")
+            
+            if msg_date == target_date:
+                date_messages.append(msg)
+                print(f"    ✅ MATCH! Added message from {msg.get('sender_name')}")
+        else:
+            print(f"  ⚠️ No date found in timestamp: {msg_date_str}")
+    
+    print(f"📊 Found {len(date_messages)} messages for {target_date}")
+    
+    if date_messages:
+        response_parts = [
+            f"📧 **Messages from {target_date}:**",
+            ""
+        ]
+        
+        for msg in date_messages:
+            time = msg.get("timestamp_str", "Unknown time")
+            sender = msg.get("sender_name", "Unknown")
+            content = msg.get("message_content", "")
+            
+            # Clean up time display if it contains the date
+            time_only = re.sub(r'\d{4}-\d{2}-\d{2}', '', time).strip(' ,')
+            
+            response_parts.append(f"• [{time_only}] **{sender}**: {content}")
+        
+        return "\n".join(response_parts)
+    else:
+        return f"""❌ **No messages found for {target_date}**
+
+**Possible reasons:**
+- No messages were sent/received on this date
+- Messages may have been archived or deleted
+- The date is outside the message history range
+
+**Try:**
+- Checking a different date
+- Asking "Show all my messages" to see available dates
+- Verifying the date format (September 6, 2025)
+"""
 
 def handle_no_team_tasks(query: str) -> str:
     """Handle when no team tasks are found"""
