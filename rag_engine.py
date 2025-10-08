@@ -593,13 +593,17 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
             return "field_specific_query"
     
     # 🆕 NEW: Date-specific message queries
+    # robust date-specific message detection
     date_message_patterns = [
-        r"message.*september.*\d+",
-        r"message.*\d{4}-\d{2}-\d{2}",
-        r"message.*yesterday",
-        r"message.*last.*week",
-        r"message.*last.*month"
+        r"(?:message|messages).*?(?:on|for|from)?\s*\d{4}-\d{2}-\d{2}",                     # 2025-10-07
+        r"(?:message|messages).*?(?:on|for|from)?\s*\d{1,2}/\d{1,2}/\d{2,4}",               # 10/7/2025 or 10/7/25
+        r"(?:message|messages).*?(?:on|for|from)?\s*(?:january|february|march|april|may|"
+        r"june|july|august|september|october|november|december)\s+\d{1,2}(?:,?\s*\d{2,4})?",# October 7, 2025
+        r"(?:message|messages).*yesterday",
+        r"(?:message|messages).*last.*week",
+        r"(?:message|messages).*last.*month"
     ]
+
     
     for pattern in date_message_patterns:
         if re.search(pattern, query_lower):
