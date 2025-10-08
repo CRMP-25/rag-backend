@@ -479,21 +479,20 @@ def parse_message_line(line: str) -> Dict[str, Any]:
 
     # --- recency detection ---
     # Default
-    recency = "this_week"
+    # --- recency detection ---
+    recency = "this_week"  # Default
 
-    # Literal hints
-    # if "TODAY:" in line or "today" in (timestamp_str or "").lower():
-    #     recency = "today"
-    if "TODAY:" in line or "TODAY:" in line:
+    # 1. Check for explicit markers first
+    if "TODAY:" in line or "today" in line.lower():
         recency = "today"
-        print(f"✅ Message marked as TODAY (explicit marker)")
-    elif "YESTERDAY:" in line or "YESTERDAY:" in line:
+        print(f" Message marked as TODAY (explicit marker in line)")
+    elif "YESTERDAY:" in line or "yesterday" in line.lower():
         recency = "yesterday"
-        print(f"✅ Message marked as YESTERDAY (explicit marker)")
+        print(f" Message marked as YESTERDAY (explicit marker in line)")
     else:
-    # 2. Try to parse ISO date from timestamp or line
+        # 2. Try to parse ISO date from timestamp or line
         try:
-            # Look for ISO date in both timestamp_str and the full line
+            # Look for ISO date YYYY-MM-DD format
             date_match = re.search(r"(\d{4}-\d{2}-\d{2})", timestamp_str or "") or \
                         re.search(r"(\d{4}-\d{2}-\d{2})", line)
             
@@ -502,23 +501,37 @@ def parse_message_line(line: str) -> Dict[str, Any]:
                 today_iso = datetime.utcnow().date().isoformat()
                 yest_iso = (datetime.utcnow() - timedelta(days=1)).date().isoformat()
                 
-                print(f"🔍 Comparing dates - Message: {date_part}, Today: {today_iso}")
+                print(f" Comparing dates - Message: {date_part}, Today: {today_iso}, Yesterday: {yest_iso}")
                 
                 if date_part == today_iso:
                     recency = "today"
-                    print(f"✅ Message classified as TODAY")
+                    print(f" Message classified as TODAY by date match")
                 elif date_part == yest_iso:
                     recency = "yesterday"
-                    print(f"✅ Message classified as YESTERDAY")
+                    print(f" Message classified as YESTERDAY by date match")
                 else:
-                    print(f"📅 Message is from this week: {date_part}")
+                    # Calculate days difference
+                    try:
+                        msg_date = datetime.strptime(date_part, '%Y-%m-%d').date()
+                        today_date = datetime.utcnow().date()
+                        days_diff = (today_date - msg_date).days
+                        
+                        if days_diff <= 7:
+                            recency = "this_week"
+                            print(f"Message is from this week ({days_diff} days ago)")
+                        else:
+                            recency = "older"
+                            print(f" Message is older ({days_diff} days ago)")
+                    except Exception as e:
+                        print(f" Date calculation error: {e}")
             else:
-                print(f"⚠️ No date found in: {timestamp_str or line[:50]}")
+                print(f" No date found in timestamp='{timestamp_str}' or line='{line[:50]}'")
         except Exception as e:
-            print(f"❌ Date parsing error: {e}")
-            pass
+            print(f"âŒ Date parsing error: {e}")
+            import traceback
+            traceback.print_exc()
 
-    print(f"📊 Final recency classification: {recency}")
+    print(f" Final recency classification: {recency}")
 
     return {
         "sender_name": sender_name,
