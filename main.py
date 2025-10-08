@@ -16,51 +16,51 @@ app.add_middleware(
 
 @app.post("/generate-insight")
 async def generate_insight(request: Request):
-    print("ðŸ“© /generate-insight endpoint hit")
+    print("📩 /generate-insight endpoint hit")
     try:
         body = await request.json()
         query = body.get("query") or body.get("prompt") or ""
         user_context = body.get("context", "")
 
-        print("ðŸ“© Query received:\n", query)
-        print(f"ðŸ“Š Context length: {len(user_context)} characters")
+        print("📩 Query received:\n", query)
+        print(f"📊 Context length: {len(user_context)} characters")
 
        
 
         # Log context preview for debugging
         if user_context:
             context_preview = user_context[:200] + "..." if len(user_context) > 200 else user_context
-            print(f"ðŸ“„ Context preview: {context_preview}")
+            print(f"📄 Context preview: {context_preview}")
         
         response = get_rag_response(query, user_context)
-        print(f"âœ… Response generated: {len(response)} characters")
+        print(f"✅ Response generated: {len(response)} characters")
         
         return {"result": response}
         
     except Exception as e:
-        print("âŒ Request failed:", str(e))
+        print("❌ Request failed:", str(e))
         import traceback
         traceback.print_exc()
         return {"result": "Internal error occurred while processing your request."}
 
 @app.post("/interpret")
 async def interpret(request: Request):
-    print("ðŸ“© /interpret endpoint hit")
+    print("📩 /interpret endpoint hit")
     try:
         body = await request.json()
         query = body.get("query", "")
         hints = body.get("hints", {})  # {"current_user_name": "...", "team_member_names": ["...","..."]}
         
-        print(f"ðŸ” Query to interpret: {query}")
-        print(f"ðŸ’¡ Hints provided: {hints}")
+        print(f"🔍 Query to interpret: {query}")
+        print(f"💡 Hints provided: {hints}")
         
         result = interpret_query(query, hints)
-        print(f"âœ… Interpretation result: {result}")
+        print(f"✅ Interpretation result: {result}")
         
         return {"result": result}
         
     except Exception as e:
-        print("âŒ Interpret failed:", str(e))
+        print("❌ Interpret failed:", str(e))
         import traceback
         traceback.print_exc()
         return {"result": {"action": "general_question", "target_user": {"type": "me"},
