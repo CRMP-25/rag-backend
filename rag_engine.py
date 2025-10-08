@@ -824,13 +824,13 @@ def handle_overdue_tasks(overdue_tasks: List[Dict], query: str) -> str:
         priority_emoji = "🔴" if priority == "High" else "🟡" if priority == "Medium" else "🟢"
         
         response_parts.append(f"""
-**{i}. {task_name}** {priority_emoji}
-   • **Due Date:** {due_date} ⚠️ ({days_overdue} days overdue)
-   • **Priority:** {priority}
-   • **Status:** {status}
-   • **Created:** {created_date}
-   • **Task ID:** {task_id}
-""".strip())
+            **{i}. {task_name}** {priority_emoji}
+            • **Due Date:** {due_date} ⚠️ ({days_overdue} days overdue)
+            • **Priority:** {priority}
+            • **Status:** {status}
+            • **Created:** {created_date}
+            """.strip())
+
     
     response_parts.extend([
         "",
