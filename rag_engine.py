@@ -1197,7 +1197,7 @@ def generate_date_message_response(query: str, parsed_data: Dict[str, Any]) -> s
         target_date = f"{year}-{month_num}-{day}"
         print(f"✅ Extracted date from month name: {target_date}")
     
-    # Pattern 2: ISO format "2025-09-06"
+    # Pattern 2: ISO format "2025-10-07"
     elif re.search(r'(\d{4})-(\d{2})-(\d{2})', query_lower):
         date_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', query_lower)
         target_date = date_match.group(0)
@@ -1226,11 +1226,10 @@ Try asking like:
     
     print(f"🔍 Searching for messages on: {target_date}")
     
-    # 🔧 FIXED: Check if query says "on" (specific day) vs "from" (date range)
+    # 🔧 CRITICAL FIX: Check if query says "on" (specific day) vs "from" (date range)
     is_specific_day = " on " in query_lower or "messages on" in query_lower
-    is_date_range = " from " in query_lower or "since" in query_lower
     
-    # 🔧 FIXED: Search ALL message categories with better date matching
+    # 🔧 FIXED: Search ALL message categories
     all_messages = (
         messages.get("today", []) + 
         messages.get("yesterday", []) + 
@@ -1238,32 +1237,33 @@ Try asking like:
     )
     
     print(f"📊 Total messages to search: {len(all_messages)}")
+    print(f"🎯 Query type: {'SPECIFIC DAY' if is_specific_day else 'DATE RANGE'}")
     
     # Filter messages for target date
-    if is_specific_day:
-        # ONLY that specific day
-        date_messages = []
-        for msg in all_messages:
-            msg_date_str = msg.get("timestamp_str", "")
-            date_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', msg_date_str)
+    date_messages = []
+    for msg in all_messages:
+        # Get the ISO date from timestamp_str (format: "HH:MM AM/PM, YYYY-MM-DD")
+        msg_timestamp = msg.get("timestamp_str", "")
+        
+        # Extract YYYY-MM-DD from the timestamp
+        date_match = re.search(r'(\d{4}-\d{2}-\d{2})', msg_timestamp)
+        
+        if date_match:
+            msg_date = date_match.group(0)
+            print(f"  🔍 Comparing: Message date={msg_date} vs Target={target_date}")
             
-            if date_match:
-                msg_date = date_match.group(0)
+            if is_specific_day:
+                # EXACT match for "on" queries
                 if msg_date == target_date:
                     date_messages.append(msg)
-                    print(f"  ✅ MATCH! Added message from {msg.get('sender_name')}")
-    else:
-        # FROM that date onwards (date range)
-        date_messages = []
-        for msg in all_messages:
-            msg_date_str = msg.get("timestamp_str", "")
-            date_match = re.search(r'(\d{4})-(\d{2})-(\d{2})', msg_date_str)
-            
-            if date_match:
-                msg_date = date_match.group(0)
-                if msg_date >= target_date:  # All messages from this date forward
+                    print(f"    ✅ EXACT MATCH! Added message from {msg.get('sender_name')}")
+            else:
+                # Range match for "from/since" queries
+                if msg_date >= target_date:
                     date_messages.append(msg)
-                    print(f"  ✅ RANGE MATCH! Added message from {msg.get('sender_name')}")
+                    print(f"    ✅ RANGE MATCH! Added message from {msg.get('sender_name')}")
+        else:
+            print(f"  ⚠️ No date found in timestamp: {msg_timestamp}")
     
     print(f"📊 Found {len(date_messages)} messages for {target_date}")
     
@@ -1274,20 +1274,32 @@ Try asking like:
             ""
         ]
         
+        # Group by sender for better organization
+        by_sender = {}
         for msg in date_messages:
-            time = msg.get("timestamp_str", "Unknown time")
             sender = msg.get("sender_name", "Unknown")
-            content = msg.get("message_content", "")
+            if sender not in by_sender:
+                by_sender[sender] = []
+            by_sender[sender].append(msg)
+        
+        # Display messages grouped by sender
+        for sender, sender_msgs in by_sender.items():
+            response_parts.append(f"**From {sender}** ({len(sender_msgs)} message{'s' if len(sender_msgs) != 1 else ''}):")
             
-            # Clean up time display if it contains the date
-            time_only = re.sub(r'\d{4}-\d{2}-\d{2}', '', time).strip(' ,')
+            for msg in sender_msgs:
+                # Clean up time display - remove date, keep only time
+                time_str = msg.get("timestamp_str", "Unknown time")
+                time_only = re.sub(r'\d{4}-\d{2}-\d{2}', '', time_str).strip(' ,')
+                
+                content = msg.get("message_content", "")
+                response_parts.append(f"  • [{time_only}] {content}")
             
-            response_parts.append(f"• [{time_only}] **{sender}**: {content}")
+            response_parts.append("")  # Add spacing between senders
         
         # Add summary
         response_parts.extend([
-            "",
-            f"📊 **Total**: {len(date_messages)} message{'s' if len(date_messages) != 1 else ''}"
+            "---",
+            f"📊 **Total**: {len(date_messages)} message{'s' if len(date_messages) != 1 else ''} from {len(by_sender)} contact{'s' if len(by_sender) != 1 else ''}"
         ])
         
         return "\n".join(response_parts)
@@ -1297,13 +1309,19 @@ Try asking like:
 
 **Possible reasons:**
 - No messages were sent/received on this date
-- Messages may have been archived or deleted
+- Messages may have been archived or deleted  
 - The date is outside the message history range
 
+**What I checked:**
+- Today's messages: {len(messages.get('today', []))}
+- Yesterday's messages: {len(messages.get('yesterday', []))}
+- This week's messages: {len(messages.get('this_week', []))}
+- Total messages searched: {len(all_messages)}
+
 **Try:**
-- Checking a different date
 - Asking "Show all my messages" to see available dates
-- Verifying the date format (October 7, 2025)
+- Checking a different date like "October 8, 2025"
+- Using ISO format: "2025-10-07"
 """
 
 def handle_no_team_tasks(query: str) -> str:
