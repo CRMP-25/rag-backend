@@ -1270,7 +1270,7 @@ Try asking like:
     if date_messages:
         date_type = "on" if is_specific_day else "since"
         
-        # 🆕 NEW: Format date nicely for display
+        # Format date nicely for display
         try:
             date_obj = datetime.strptime(target_date, '%Y-%m-%d')
             display_date = date_obj.strftime('%B %d, %Y')  # "October 07, 2025"
@@ -1281,6 +1281,28 @@ Try asking like:
             f"✅ **You received {len(date_messages)} message{'s' if len(date_messages) != 1 else ''} {date_type} {display_date}:**",
             ""
         ]
+        
+        # 🔧 CRITICAL FIX: Show DETAILED messages, not grouped
+        for msg in date_messages:
+            sender = msg.get("sender_name", "Unknown")
+            content = msg.get("message_content", "")
+            
+            # Extract just the time part from timestamp
+            time_str = msg.get("timestamp_str", "Unknown time")
+            # Remove the date portion, keep only time
+            time_only = re.sub(r',?\s*\d{4}-\d{2}-\d{2}', '', time_str).strip(' ,')
+            
+            response_parts.append(f"• **{sender}** ({time_only}): {content}")
+        
+        # Add summary at the end
+        unique_senders = len(set(m.get("sender_name", "Unknown") for m in date_messages))
+        response_parts.extend([
+            "",
+            "---",
+            f"📊 **Summary**: {len(date_messages)} message{'s' if len(date_messages) != 1 else ''} from {unique_senders} contact{'s' if unique_senders != 1 else ''}"
+        ])
+        
+        return "\n".join(response_parts)
         
         # Group by sender for better organization
         by_sender = {}
