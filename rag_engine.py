@@ -1269,8 +1269,16 @@ Try asking like:
     
     if date_messages:
         date_type = "on" if is_specific_day else "since"
+        
+        # 🆕 NEW: Format date nicely for display
+        try:
+            date_obj = datetime.strptime(target_date, '%Y-%m-%d')
+            display_date = date_obj.strftime('%B %d, %Y')  # "October 07, 2025"
+        except:
+            display_date = target_date
+        
         response_parts = [
-            f"📧 **Messages {date_type} {target_date}:**",
+            f"✅ **You received {len(date_messages)} message{'s' if len(date_messages) != 1 else ''} {date_type} {display_date}:**",
             ""
         ]
         
@@ -1304,8 +1312,15 @@ Try asking like:
         
         return "\n".join(response_parts)
     else:
+        # 🆕 ENHANCED: Better "no messages" response
+        try:
+            date_obj = datetime.strptime(target_date, '%Y-%m-%d')
+            display_date = date_obj.strftime('%B %d, %Y')
+        except:
+            display_date = target_date
+            
         date_type = "on" if is_specific_day else "since"
-        return f"""❌ **No messages found {date_type} {target_date}**
+        return f"""❌ **No messages found {date_type} {display_date}**
 
 **Possible reasons:**
 - No messages were sent/received on this date
