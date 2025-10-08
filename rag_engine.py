@@ -98,6 +98,13 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
             current_user = None
             print(f"💬 Line {line_num}: Entered MESSAGES section")
             continue
+        elif (re.search(r"(team messages:|message data|recent messages:?)", line, re.I)
+            or line.strip().startswith("🧾 Recent Messages")
+            or "TEAM MESSAGES" in line):  # ✅ NEW: Also catch "💬 TEAM MESSAGES"
+            current_section = "messages"
+            current_user = None
+            print(f"💬 Line {line_num}: Entered MESSAGES section via: {line[:50]}")
+            continue
 
         # Check for user headers in team task sections (e.g., "👤 John Doe:")
         # FIXED: This should work regardless of current section
@@ -431,6 +438,8 @@ def build_dynamic_team_context(current_user_id: str, target_info: Dict) -> str:
 
 def parse_message_line(line: str) -> Dict[str, Any]:
     """Parse one message bullet into a dict with sender, content, timestamp_str, recency, count."""
+    
+    print(f"🔍 PARSING MESSAGE LINE: {line[:80]}")  # ✅ NEW: Debug what we're parsing
 
     # Multiple formats your context can emit
     patterns = [
@@ -440,33 +449,46 @@ def parse_message_line(line: str) -> Dict[str, Any]:
         # e.g. "From John Doe: Hello there (2025-09-09 10:22)"
         r"From\s+([^:]+):\s*([^(]+)\s*\(([^)]+)\)",
 
+        # ✅ NEW PATTERN: "• From John Doe: message (HH:MM AM/PM, YYYY-MM-DD)"
+        r"[•➤]\s*From\s+([^:]+):\s*(.+?)\s*\(([^,]+),\s*([^)]+)\)",
+
         # e.g. "• From John Doe: Hello there"
-        r"[•→]\s*From\s+([^:]+):\s*(.+)",
+        r"[•➤]\s*From\s+([^:]+):\s*(.+)",
 
         # e.g. "• John Doe: Hello there"
-        r"[•→]\s*([^:]+?):\s*(.+)"
+        r"[•➤]\s*([^:]+?):\s*(.+)"
     ]
 
     sender_name = None
     message_content = ""
     timestamp_str = "recent"
     message_count = 1
+    date_str = None  # ✅ NEW: Store date separately
 
-    for pattern in patterns:
+    for i, pattern in enumerate(patterns):
         m = re.search(pattern, line, re.IGNORECASE)
         if not m:
             continue
 
-        if pattern == patterns[0]:  # complex "Latest (...)" form
+        print(f"✅ Pattern {i} MATCHED: {pattern[:50]}")  # ✅ NEW: Debug match
+
+        if i == 0:  # complex "Latest (...)" form
             sender_name = m.group(1).strip()
             message_count = int(m.group(2)) if m.group(2).isdigit() else 1
             timestamp_str = m.group(3).strip()
             message_content = m.group(4).strip()
-        elif pattern == patterns[1]:  # "...: text (YYYY-MM-DD ...)"
+        elif i == 1:  # "...: text (YYYY-MM-DD ...)"
             sender_name = m.group(1).strip()
             message_content = m.group(2).strip()
             timestamp_str = m.group(3).strip()
             message_count = 1
+        elif i == 2:  # ✅ NEW: "• From X: msg (time, date)"
+            sender_name = m.group(1).strip()
+            message_content = m.group(2).strip()
+            timestamp_str = m.group(3).strip()
+            date_str = m.group(4).strip()  # ✅ Got the date!
+            message_count = 1
+            print(f"✅ EXTRACTED: sender={sender_name}, date={date_str}, time={timestamp_str}")
         else:  # simple 2-group forms
             sender_name = m.group(1).strip()
             message_content = m.group(2).strip() if len(m.groups()) >= 2 else ""
@@ -475,40 +497,41 @@ def parse_message_line(line: str) -> Dict[str, Any]:
         break
 
     if not sender_name:
+        print(f"❌ NO SENDER FOUND in line: {line[:80]}")
         return None
 
     # --- recency detection ---
-    # Default
-    # --- recency detection ---
     recency = "this_week"  # Default
 
-    # 1. Check for explicit markers first
-    if "TODAY:" in line or "today" in line.lower():
+    # 1. Check section markers in ORIGINAL LINE
+    if "TODAY:" in line or "📅 TODAY:" in line:
         recency = "today"
-        print(f" Message marked as TODAY (explicit marker in line)")
-    elif "YESTERDAY:" in line or "yesterday" in line.lower():
+        print(f"✅ Message marked as TODAY (section marker)")
+    elif "YESTERDAY:" in line or "📅 YESTERDAY:" in line:
         recency = "yesterday"
-        print(f" Message marked as YESTERDAY (explicit marker in line)")
+        print(f"✅ Message marked as YESTERDAY (section marker)")
     else:
-        # 2. Try to parse ISO date from timestamp or line
+        # 2. Try to parse date from extracted date_str OR timestamp
         try:
+            # Use extracted date_str if we have it
+            date_to_check = date_str or timestamp_str or ""
+            
             # Look for ISO date YYYY-MM-DD format
-            date_match = re.search(r"(\d{4}-\d{2}-\d{2})", timestamp_str or "") or \
-                        re.search(r"(\d{4}-\d{2}-\d{2})", line)
+            date_match = re.search(r"(\d{4}-\d{2}-\d{2})", date_to_check)
             
             if date_match:
                 date_part = date_match.group(1)
                 today_iso = datetime.utcnow().date().isoformat()
                 yest_iso = (datetime.utcnow() - timedelta(days=1)).date().isoformat()
                 
-                print(f" Comparing dates - Message: {date_part}, Today: {today_iso}, Yesterday: {yest_iso}")
+                print(f"🔍 Comparing dates - Message: {date_part}, Today: {today_iso}, Yesterday: {yest_iso}")
                 
                 if date_part == today_iso:
                     recency = "today"
-                    print(f" Message classified as TODAY by date match")
+                    print(f"✅ Message classified as TODAY by date match")
                 elif date_part == yest_iso:
                     recency = "yesterday"
-                    print(f" Message classified as YESTERDAY by date match")
+                    print(f"✅ Message classified as YESTERDAY by date match")
                 else:
                     # Calculate days difference
                     try:
@@ -518,20 +541,20 @@ def parse_message_line(line: str) -> Dict[str, Any]:
                         
                         if days_diff <= 7:
                             recency = "this_week"
-                            print(f"Message is from this week ({days_diff} days ago)")
+                            print(f"📅 Message is from this week ({days_diff} days ago)")
                         else:
                             recency = "older"
-                            print(f" Message is older ({days_diff} days ago)")
+                            print(f"📅 Message is older ({days_diff} days ago)")
                     except Exception as e:
-                        print(f" Date calculation error: {e}")
+                        print(f"⚠️ Date calculation error: {e}")
             else:
-                print(f" No date found in timestamp='{timestamp_str}' or line='{line[:50]}'")
+                print(f"⚠️ No date found in: {date_to_check[:50]}")
         except Exception as e:
-            print(f"âŒ Date parsing error: {e}")
+            print(f"❌ Date parsing error: {e}")
             import traceback
             traceback.print_exc()
 
-    print(f" Final recency classification: {recency}")
+    print(f"📊 Final: sender={sender_name}, recency={recency}, content={message_content[:30]}")
 
     return {
         "sender_name": sender_name,
