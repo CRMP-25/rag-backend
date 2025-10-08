@@ -5,24 +5,24 @@ from langchain.prompts import PromptTemplate
 from langchain_ollama import OllamaLLM
 
 def wait_for_ollama(timeout=30):
-    print("⏳ Waiting for Ollama to be ready...")
+    print("â³ Waiting for Ollama to be ready...")
     for _ in range(timeout):
         try:
             r = requests.get("http://localhost:11434")
             if r.status_code == 200:
-                print("✅ Ollama is ready.")
+                print("âœ… Ollama is ready.")
                 return True
         except Exception:
             pass
         time.sleep(1)
-    print("❌ Ollama did not start in time.")
+    print("âŒ Ollama did not start in time.")
     return False
 
 def parse_user_context(user_context: str) -> Dict[str, Any]:
     """Enhanced context parsing for both individual and team tasks with debug info"""
     
-    print(f"🔍 CONTEXT PARSER - Input length: {len(user_context)}")
-    print(f"🔍 CONTEXT PARSER - Raw context preview:")
+    print(f"ðŸ” CONTEXT PARSER - Input length: {len(user_context)}")
+    print(f"ðŸ” CONTEXT PARSER - Raw context preview:")
     print(f"First 500 characters: {user_context[:500]}")
     print("="*50)
     
@@ -48,14 +48,14 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
     }
     
     if not user_context.strip():
-        print("⚠️ CONTEXT PARSER - Empty context received")
+        print("âš ï¸ CONTEXT PARSER - Empty context received")
         return parsed_data
     
     lines = user_context.split('\n')
     current_section = None
     current_user = None  # For team task parsing
     
-    print(f"🔍 CONTEXT PARSER - Processing {len(lines)} lines")
+    print(f"ðŸ” CONTEXT PARSER - Processing {len(lines)} lines")
     
     for line_num, line in enumerate(lines, 1):
         line = line.strip()
@@ -68,14 +68,14 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
         if (
             "YOUR ACTIVE TASKS:" in line or
             "YOUR KANBAN TASKS:" in line or
-            line.startswith("🚨 OVERDUE TASKS:") or
-            line.startswith("📅 DUE TODAY:") or
-            line.startswith("📆 DUE TOMORROW:") or
-            line.startswith("📅 THIS WEEK:")
+            line.startswith("ðŸš¨ OVERDUE TASKS:") or
+            line.startswith("ðŸ“… DUE TODAY:") or
+            line.startswith("ðŸ“† DUE TOMORROW:") or
+            line.startswith("ðŸ“… THIS WEEK:")
         ):
             current_section = "tasks"
             current_user = None
-            print(f"📋 Line {line_num}: Entered PERSONAL TASKS section via header: {line}")
+            print(f"ðŸ“‹ Line {line_num}: Entered PERSONAL TASKS section via header: {line}")
             continue
 
         elif (
@@ -89,25 +89,25 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
         ):
             current_section = "team_tasks"
             current_user = None
-            print(f"🏢 Line {line_num}: Entered TEAM TASKS section via header: {line}")
+            print(f"ðŸ¢ Line {line_num}: Entered TEAM TASKS section via header: {line}")
             continue
 
         elif (re.search(r"(team messages:|message data|recent messages:?)", line, re.I)
-            or line.strip().startswith("🧾 Recent Messages")):
+            or line.strip().startswith("ðŸ§¾ Recent Messages")):
             current_section = "messages"
             current_user = None
-            print(f"💬 Line {line_num}: Entered MESSAGES section")
+            print(f"ðŸ’¬ Line {line_num}: Entered MESSAGES section")
             continue
 
-        # Check for user headers in team task sections (e.g., "👤 John Doe:")
+        # Check for user headers in team task sections (e.g., "ðŸ‘¤ John Doe:")
         # FIXED: This should work regardless of current section
-        if line.startswith("👤"):
+        if line.startswith("ðŸ‘¤"):
             # If we see a user header, we're definitely in team tasks section
             if current_section != "team_tasks":
                 current_section = "team_tasks"
-                print(f"🏢 Line {line_num}: Implicitly entered TEAM TASKS section (saw user header)")
+                print(f"ðŸ¢ Line {line_num}: Implicitly entered TEAM TASKS section (saw user header)")
             
-            user_match = re.search(r"👤\s*([^:]+):", line)
+            user_match = re.search(r"ðŸ‘¤\s*([^:]+):", line)
             if user_match:
                 current_user = user_match.group(1).strip()
                 if current_user not in parsed_data["team_tasks"]:
@@ -115,11 +115,11 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
                 # Add to team members list if not already there
                 if current_user not in parsed_data["team_members"]:
                     parsed_data["team_members"].append(current_user)
-                print(f"👤 Line {line_num}: Found user section for '{current_user}'")
+                print(f"ðŸ‘¤ Line {line_num}: Found user section for '{current_user}'")
                 continue
 
         # Parse content based on section
-        if line.startswith("•") or line.startswith("→") or line.startswith("-") or line.startswith("  •"):
+        if line.startswith("â€¢") or line.startswith("â†’") or line.startswith("-") or line.startswith("  â€¢"):
             if current_section == "tasks":
                 # Individual task parsing (existing logic)
                 task_info = parse_task_line(line)
@@ -127,15 +127,15 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
                     parsed_data["tasks"]["total_count"] += 1
                     if task_info["urgency"] == "OVERDUE":
                         parsed_data["tasks"]["overdue"].append(task_info)
-                        print(f"🚨 Line {line_num}: Found OVERDUE task: {task_info['task_name']}")
+                        print(f"ðŸš¨ Line {line_num}: Found OVERDUE task: {task_info['task_name']}")
                     elif task_info["urgency"] == "DUE TODAY":
                         parsed_data["tasks"]["today"].append(task_info)
-                        print(f"📅 Line {line_num}: Found TODAY task: {task_info['task_name']}")
+                        print(f"ðŸ“… Line {line_num}: Found TODAY task: {task_info['task_name']}")
                     else:
                         parsed_data["tasks"]["upcoming"].append(task_info)
-                        print(f"📈 Line {line_num}: Found UPCOMING task: {task_info['task_name']}")
+                        print(f"ðŸ“ˆ Line {line_num}: Found UPCOMING task: {task_info['task_name']}")
                 else:
-                    print(f"⚠️ Line {line_num}: Failed to parse task line: {line[:50]}...")
+                    print(f"âš ï¸ Line {line_num}: Failed to parse task line: {line[:50]}...")
                         
             elif current_section == "team_tasks" and current_user:
                 # Team task parsing (new logic)
@@ -143,9 +143,9 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
                 if task_info:
                     task_info["assigned_to"] = current_user
                     parsed_data["team_tasks"][current_user].append(task_info)
-                    print(f"🏢 Line {line_num}: Found team task for '{current_user}': {task_info['task_name']}")
+                    print(f"ðŸ¢ Line {line_num}: Found team task for '{current_user}': {task_info['task_name']}")
                 else:
-                    print(f"⚠️ Line {line_num}: Failed to parse team task line: {line[:50]}...")
+                    print(f"âš ï¸ Line {line_num}: Failed to parse team task line: {line[:50]}...")
                         
             elif current_section == "messages":
                 # Message parsing (existing logic)
@@ -166,9 +166,9 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
                     if sender not in parsed_data["messages"]["by_sender"]:
                         parsed_data["messages"]["by_sender"][sender] = []
                     parsed_data["messages"]["by_sender"][sender].append(msg_info)
-                    print(f"💬 Line {line_num}: Found message from {sender}")
+                    print(f"ðŸ’¬ Line {line_num}: Found message from {sender}")
                 else:
-                    print(f"⚠️ Line {line_num}: Failed to parse message line: {line[:50]}...")
+                    print(f"âš ï¸ Line {line_num}: Failed to parse message line: {line[:50]}...")
     
     # Final summary
     tasks = parsed_data["tasks"]
@@ -178,7 +178,7 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
     team_task_count = sum(len(user_tasks) for user_tasks in team_tasks.values())
     team_users_count = len(team_tasks)
     
-    print(f"📊 CONTEXT PARSER SUMMARY:")
+    print(f"ðŸ“Š CONTEXT PARSER SUMMARY:")
     print(f"  Individual Tasks: {tasks['total_count']} total ({len(tasks['overdue'])} overdue, {len(tasks['today'])} today, {len(tasks['upcoming'])} upcoming)")
     print(f"  Team Tasks: {team_task_count} total across {team_users_count} team members")
     print(f"  Messages: {messages['total_count']} total ({len(messages['today'])} today, {len(messages['yesterday'])} yesterday)")
@@ -193,7 +193,7 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
 def parse_task_line(line: str) -> Dict[str, Any]:
     """Parse task line with created_date support"""
     
-    clean_line = re.sub(r"^[\s•→'-]+", "", line).strip()
+    clean_line = re.sub(r"^[\sâ€¢â†’'-]+", "", line).strip()
     
     # Enhanced pattern to capture created date
     mhead = re.search(r"\[([^\]]+)\]\s*([^(]+?)\s*\((.*)\)\s*$", clean_line)
@@ -205,9 +205,9 @@ def parse_task_line(line: str) -> Dict[str, Any]:
         pm = re.search(r"Priority:\s*([^,)\]]+)", meta, re.I)
         sm = re.search(r"Status:\s*([^,)\]]+)", meta, re.I)
         dm = re.search(r"Due:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", meta, re.I)
-        # 🆕 NEW: Extract created date
+        # ðŸ†• NEW: Extract created date
         cm = re.search(r"Created:\s*([^,)\]]+)", meta, re.I)
-        # 🆕 NEW: Extract Task ID
+        # ðŸ†• NEW: Extract Task ID
         im = re.search(r"Task ID:\s*([^,)\]]+)", meta, re.I)
         
         due_date_raw = dm.group(1).strip() if dm else None
@@ -220,8 +220,8 @@ def parse_task_line(line: str) -> Dict[str, Any]:
             "priority": (pm.group(1).strip() if pm else "Medium"),
             "status": (sm.group(1).strip() if sm else "Active"),
             "due_date": (due_date_raw or "No date"),
-            "created_date": (created_date or "Unknown"),  # 🆕 NEW
-            "task_id": task_id  # 🆕 NEW
+            "created_date": (created_date or "Unknown"),  # ðŸ†• NEW
+            "task_id": task_id  # ðŸ†• NEW
         }
     
     # Keep existing fallback patterns...
@@ -237,8 +237,8 @@ def parse_task_line(line: str) -> Dict[str, Any]:
             "priority": "Medium",
             "status": "Active",
             "due_date": "No date",
-            "created_date": "Unknown",  # 🆕 NEW
-            "task_id": None  # 🆕 NEW
+            "created_date": "Unknown",  # ðŸ†• NEW
+            "task_id": None  # ðŸ†• NEW
         }
     
     if clean_line:
@@ -248,8 +248,8 @@ def parse_task_line(line: str) -> Dict[str, Any]:
             "priority": "Medium",
             "status": "Active", 
             "due_date": "No date",
-            "created_date": "Unknown",  # 🆕 NEW
-            "task_id": None  # 🆕 NEW
+            "created_date": "Unknown",  # ðŸ†• NEW
+            "task_id": None  # ðŸ†• NEW
         }
     
     return None
@@ -289,13 +289,13 @@ def get_team_members_by_query(query: str, users_data: List[Dict]) -> Dict[str, L
     for team_key, patterns in team_patterns.items():
         if any(pattern in query_lower for pattern in patterns):
             selected_teams.append(team_key)
-            print(f"🎯 Detected team: {team_key}")
+            print(f"ðŸŽ¯ Detected team: {team_key}")
     
     # Check for role matches  
     for role_key, patterns in role_patterns.items():
         if any(pattern in query_lower for pattern in patterns):
             selected_roles.append(role_key)
-            print(f"🎯 Detected role: {role_key}")
+            print(f"ðŸŽ¯ Detected role: {role_key}")
     
     # Filter users based on detected teams and roles
     filtered_users = []
@@ -340,7 +340,7 @@ def get_team_members_by_query(query: str, users_data: List[Dict]) -> Dict[str, L
         # Include user if they match team OR role criteria
         if (not selected_teams and not selected_roles) or team_match or role_match:
             filtered_users.append(user_name)
-            print(f"✅ Including user: {user_name} (Team: {user.get('team')}, Role: {user.get('role')})")
+            print(f"âœ… Including user: {user_name} (Team: {user.get('team')}, Role: {user.get('role')})")
     
     return {
         'team_type': '_'.join(selected_teams + selected_roles) if (selected_teams or selected_roles) else 'all',
@@ -364,7 +364,7 @@ def get_user_tasks_by_name(user_name: str) -> List[Dict]:
         return []
         
     except Exception as e:
-        print(f"❌ Error fetching tasks for {user_name}: {e}")
+        print(f"âŒ Error fetching tasks for {user_name}: {e}")
         return []
     
 def determine_task_urgency(task: Dict) -> str:
@@ -416,15 +416,15 @@ def build_dynamic_team_context(current_user_id: str, target_info: Dict) -> str:
         user_tasks = get_user_tasks_by_name(user_name)  # This function needs to be implemented
         
         if user_tasks:
-            context_parts.append(f"👤 {user_name}:")
+            context_parts.append(f"ðŸ‘¤ {user_name}:")
             for task in user_tasks:
                 # Format task line
                 urgency = determine_task_urgency(task)  # You'll need this function too
-                task_line = f"  • [{urgency}] {task['name']} (Priority: {task.get('priority', 'Medium')}, Status: {task.get('status', 'Active')}, Due: {task.get('due_date', 'No date')})"
+                task_line = f"  â€¢ [{urgency}] {task['name']} (Priority: {task.get('priority', 'Medium')}, Status: {task.get('status', 'Active')}, Due: {task.get('due_date', 'No date')})"
                 context_parts.append(task_line)
             context_parts.append("")
         else:
-            context_parts.append(f"👤 {user_name}: No active tasks")
+            context_parts.append(f"ðŸ‘¤ {user_name}: No active tasks")
             context_parts.append("")
     
     return "\n".join(context_parts)
@@ -440,11 +440,11 @@ def parse_message_line(line: str) -> Dict[str, Any]:
         # e.g. "From John Doe: Hello there (2025-09-09 10:22)"
         r"From\s+([^:]+):\s*([^(]+)\s*\(([^)]+)\)",
 
-        # e.g. "• From John Doe: Hello there"
-        r"[•→]\s*From\s+([^:]+):\s*(.+)",
+        # e.g. "â€¢ From John Doe: Hello there"
+        r"[â€¢â†’]\s*From\s+([^:]+):\s*(.+)",
 
-        # e.g. "• John Doe: Hello there"
-        r"[•→]\s*([^:]+?):\s*(.+)"
+        # e.g. "â€¢ John Doe: Hello there"
+        r"[â€¢â†’]\s*([^:]+?):\s*(.+)"
     ]
 
     sender_name = None
@@ -482,43 +482,24 @@ def parse_message_line(line: str) -> Dict[str, Any]:
     recency = "this_week"
 
     # Literal hints
-    # if "TODAY:" in line or "today" in (timestamp_str or "").lower():
-    #     recency = "today"
-    if "TODAY:" in line or "TODAY:" in line:
+    if "TODAY:" in line or "today" in (timestamp_str or "").lower():
         recency = "today"
-        print(f"✅ Message marked as TODAY (explicit marker)")
-    elif "YESTERDAY:" in line or "YESTERDAY:" in line:
+    elif "YESTERDAY:" in line or "yesterday" in (timestamp_str or "").lower():
         recency = "yesterday"
-        print(f"✅ Message marked as YESTERDAY (explicit marker)")
     else:
-    # 2. Try to parse ISO date from timestamp or line
+        # Map ISO-like dates in timestamp to today/yesterday
         try:
-            # Look for ISO date in both timestamp_str and the full line
-            date_match = re.search(r"(\d{4}-\d{2}-\d{2})", timestamp_str or "") or \
-                        re.search(r"(\d{4}-\d{2}-\d{2})", line)
-            
-            if date_match:
-                date_part = date_match.group(1)
+            m = re.search(r"\d{4}-\d{2}-\d{2}", timestamp_str or "")
+            if m:
+                date_part = m.group(0)
                 today_iso = datetime.utcnow().date().isoformat()
                 yest_iso = (datetime.utcnow() - timedelta(days=1)).date().isoformat()
-                
-                print(f"🔍 Comparing dates - Message: {date_part}, Today: {today_iso}")
-                
                 if date_part == today_iso:
                     recency = "today"
-                    print(f"✅ Message classified as TODAY")
                 elif date_part == yest_iso:
                     recency = "yesterday"
-                    print(f"✅ Message classified as YESTERDAY")
-                else:
-                    print(f"📅 Message is from this week: {date_part}")
-            else:
-                print(f"⚠️ No date found in: {timestamp_str or line[:50]}")
-        except Exception as e:
-            print(f"❌ Date parsing error: {e}")
+        except Exception:
             pass
-
-    print(f"📊 Final recency classification: {recency}")
 
     return {
         "sender_name": sender_name,
@@ -530,12 +511,12 @@ def parse_message_line(line: str) -> Dict[str, Any]:
 
 
 def classify_query_type(query: str, team_members: List[str] = None) -> str:
-    """🆕 ENHANCED: More comprehensive query classification"""
+    """ðŸ†• ENHANCED: More comprehensive query classification"""
     
     query_lower = query.lower()
     team_members = team_members or []
     
-    # 🆕 NEW: Specific field queries (created_at, due_date, status, etc.)
+    # ðŸ†• NEW: Specific field queries (created_at, due_date, status, etc.)
     field_specific_patterns = [
         r"(what|when).*created.*date",
         r"(what|when).*due.*date", 
@@ -552,10 +533,10 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
     
     for pattern in field_specific_patterns:
         if re.search(pattern, query_lower):
-            print(f"🎯 FIELD-SPECIFIC QUERY MATCH: {pattern}")
+            print(f"ðŸŽ¯ FIELD-SPECIFIC QUERY MATCH: {pattern}")
             return "field_specific_query"
     
-    # 🆕 NEW: Date-specific message queries
+    # ðŸ†• NEW: Date-specific message queries
     date_message_patterns = [
         r"message.*september.*\d+",
         r"message.*\d{4}-\d{2}-\d{2}",
@@ -566,10 +547,10 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
     
     for pattern in date_message_patterns:
         if re.search(pattern, query_lower):
-            print(f"📅 DATE-SPECIFIC MESSAGE QUERY: {pattern}")
+            print(f"ðŸ“… DATE-SPECIFIC MESSAGE QUERY: {pattern}")
             return "date_message_query"
     
-    # 🆕 NEW: Kanban-specific queries
+    # ðŸ†• NEW: Kanban-specific queries
     kanban_patterns = [
         r"kanban.*task",
         r"board.*task",
@@ -581,10 +562,10 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
     
     for pattern in kanban_patterns:
         if re.search(pattern, query_lower):
-            print(f"📋 KANBAN QUERY MATCH: {pattern}")
+            print(f"ðŸ“‹ KANBAN QUERY MATCH: {pattern}")
             return "kanban_query"
     
-    # 🆕 NEW: Attachment queries
+    # ðŸ†• NEW: Attachment queries
     attachment_patterns = [
         r"attachment",
         r"file.*upload",
@@ -595,7 +576,7 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
     
     for pattern in attachment_patterns:
         if re.search(pattern, query_lower):
-            print(f"📎 ATTACHMENT QUERY MATCH: {pattern}")
+            print(f"ðŸ“Ž ATTACHMENT QUERY MATCH: {pattern}")
             return "attachment_query"
     
     # Keep existing team task detection
@@ -611,7 +592,7 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
     
     for pattern in team_task_patterns:
         if re.search(pattern, query_lower):
-            print(f"🏢 TEAM TASK PATTERN MATCH: {pattern}")
+            print(f"ðŸ¢ TEAM TASK PATTERN MATCH: {pattern}")
             return "team_task_query"
     
     # Keep existing strong task patterns
@@ -626,7 +607,7 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
     
     for pattern in strong_task_patterns:
         if re.search(pattern, query_lower):
-            print(f"🎯 STRONG TASK PATTERN MATCH: {pattern}")
+            print(f"ðŸŽ¯ STRONG TASK PATTERN MATCH: {pattern}")
             return "task_query"
     
     # Keep existing strong message patterns
@@ -639,7 +620,7 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
     
     for pattern in strong_message_patterns:
         if re.search(pattern, query_lower):
-            print(f"💬 STRONG MESSAGE PATTERN MATCH: {pattern}")
+            print(f"ðŸ’¬ STRONG MESSAGE PATTERN MATCH: {pattern}")
             return "message_query"
     
     # Default scoring logic (keep existing)
@@ -661,71 +642,71 @@ def classify_query_type(query: str, team_members: List[str] = None) -> str:
 def get_rag_response(query: str, user_context: str = ""):
     """Main RAG response function with enhanced routing"""
     
-    print(f"🔥 ENHANCED RAG ENGINE - Processing query: {query}")
-    print(f"📊 Context length: {len(user_context)} characters")
+    print(f"ðŸ”¥ ENHANCED RAG ENGINE - Processing query: {query}")
+    print(f"ðŸ“Š Context length: {len(user_context)} characters")
 
     if not wait_for_ollama():
-        return "⚠️ AI backend is temporarily unavailable. Please try again in a moment."
+        return "âš ï¸ AI backend is temporarily unavailable. Please try again in a moment."
 
     # Parse the context
     parsed_data = parse_user_context(user_context)
     
-    print(f"📋 Parsed tasks: {parsed_data['tasks']['total_count']}")
-    print(f"💬 Parsed messages: {parsed_data['messages']['total_count']}")
+    print(f"ðŸ“‹ Parsed tasks: {parsed_data['tasks']['total_count']}")
+    print(f"ðŸ’¬ Parsed messages: {parsed_data['messages']['total_count']}")
     
     # Classify the query
     query_type = classify_query_type(query, parsed_data['team_members'])
-    print(f"🎯 Query classified as: {query_type}")
+    print(f"ðŸŽ¯ Query classified as: {query_type}")
     
-    # 🆕 NEW: Route to appropriate handler
+    # ðŸ†• NEW: Route to appropriate handler
     if query_type == "field_specific_query":
-        print("🔍 Generating FIELD-SPECIFIC response")
+        print("ðŸ” Generating FIELD-SPECIFIC response")
         return generate_field_specific_response(query, parsed_data)
     
     elif query_type == "kanban_query":
-        print("📋 Generating KANBAN response")
+        print("ðŸ“‹ Generating KANBAN response")
         return generate_kanban_response(query, parsed_data)
     
     elif query_type == "date_message_query":
-        print("📅 Generating DATE-SPECIFIC MESSAGE response")
+        print("ðŸ“… Generating DATE-SPECIFIC MESSAGE response")
         return generate_date_message_response(query, parsed_data)
     
     elif query_type == "attachment_query":
         # You'll need to implement this based on your attachment data structure
-        print("📎 Generating ATTACHMENT response")
-        return "📎 Attachment queries are being processed..."
+        print("ðŸ“Ž Generating ATTACHMENT response")
+        return "ðŸ“Ž Attachment queries are being processed..."
     
     elif query_type == "team_task_query":
-        print("🏢 Generating TEAM TASK response")
+        print("ðŸ¢ Generating TEAM TASK response")
         return generate_team_task_response(query, parsed_data)
     
     elif query_type == "task_query":
-        print("📋 Generating TASK response")
+        print("ðŸ“‹ Generating TASK response")
         return generate_task_response(query, parsed_data)
     
     elif query_type == "message_query":
-        print("💬 Generating MESSAGE response")  
+        print("ðŸ’¬ Generating MESSAGE response")  
         return generate_message_response(query, parsed_data)
     
     else:
-        print("🤖 Generating GENERAL response")
+        print("ðŸ¤– Generating GENERAL response")
         return generate_general_response(query, parsed_data, user_context)
 
 
 def generate_task_response(query: str, parsed_data: Dict[str, Any]) -> str:
     """Generate response specifically for task queries"""
     
-    print("🎯 Generating TASK response")
+    print("ðŸŽ¯ Generating TASK response")
     
     tasks = parsed_data["tasks"]
     q = (query or "").lower()
     if any(k in q for k in ["overdue", "past due", "late"]) and tasks["overdue"]:
-        print("🚨 Overdue requested explicitly — showing overdue first")
+        print("ðŸš¨ Overdue requested explicitly â€” showing overdue first")
         return handle_overdue_tasks(tasks["overdue"], query)
 
     
     # Log what we found
-    print(f"📊 Task breakdown:")
+    print(f"ðŸ“Š Task breakdown:")
     print(f"  - Overdue: {len(tasks['overdue'])}")
     print(f"  - Due today: {len(tasks['today'])}")
     print(f"  - Upcoming: {len(tasks['upcoming'])}")
@@ -733,27 +714,27 @@ def generate_task_response(query: str, parsed_data: Dict[str, Any]) -> str:
     
     # Handle different task scenarios with priority order
     if tasks["today"]:
-        print("📅 Handling TODAY tasks")
+        print("ðŸ“… Handling TODAY tasks")
         return handle_today_tasks(tasks["today"], query)
     elif tasks["overdue"]:
-        print("🚨 Handling OVERDUE tasks")
+        print("ðŸš¨ Handling OVERDUE tasks")
         return handle_overdue_tasks(tasks["overdue"], query)
    
     elif tasks["upcoming"]:
-        print("📈 Handling UPCOMING tasks")
+        print("ðŸ“ˆ Handling UPCOMING tasks")
         return handle_upcoming_tasks(tasks["upcoming"], query)
     else:
-        print("✅ No tasks found")
+        print("âœ… No tasks found")
         return handle_no_tasks(query)
 
 def handle_overdue_tasks(overdue_tasks: List[Dict], query: str) -> str:
-    """🆕 ENHANCED: More professional overdue response with full details"""
+    """ðŸ†• ENHANCED: More professional overdue response with full details"""
     
     count = len(overdue_tasks)
-    print(f"🚨 Processing {count} overdue tasks")
+    print(f"ðŸš¨ Processing {count} overdue tasks")
     
     response_parts = [
-        f"🚨 **CRITICAL ALERT: {count} Overdue Task{'s' if count > 1 else ''}**",
+        f"ðŸš¨ **CRITICAL ALERT: {count} Overdue Task{'s' if count > 1 else ''}**",
         "",
         "**Status:** Your schedule requires immediate attention.",
         "**Action Required:** Please prioritize the following tasks:",
@@ -780,29 +761,29 @@ def handle_overdue_tasks(overdue_tasks: List[Dict], query: str) -> str:
         else:
             days_overdue = 0
         
-        priority_emoji = "🔴" if priority == "High" else "🟡" if priority == "Medium" else "🟢"
+        priority_emoji = "ðŸ”´" if priority == "High" else "ðŸŸ¡" if priority == "Medium" else "ðŸŸ¢"
         
         response_parts.append(f"""
 **{i}. {task_name}** {priority_emoji}
-   • **Due Date:** {due_date} ⚠️ ({days_overdue} days overdue)
-   • **Priority:** {priority}
-   • **Status:** {status}
-   • **Created:** {created_date}
-   • **Task ID:** {task_id}
+   â€¢ **Due Date:** {due_date} âš ï¸ ({days_overdue} days overdue)
+   â€¢ **Priority:** {priority}
+   â€¢ **Status:** {status}
+   â€¢ **Created:** {created_date}
+   â€¢ **Task ID:** {task_id}
 """.strip())
     
     response_parts.extend([
         "",
         "---",
-        "**📋 Immediate Action Plan:**",
-        f"1️⃣ **Start immediately with:** '{overdue_tasks[0]['task_name']}'",
-        "2️⃣ **Clear your calendar** to focus on overdue items",
-        "3️⃣ **Notify stakeholders** about any delays",
-        "4️⃣ **Request deadline extensions** if needed",
+        "**ðŸ“‹ Immediate Action Plan:**",
+        f"1ï¸âƒ£ **Start immediately with:** '{overdue_tasks[0]['task_name']}'",
+        "2ï¸âƒ£ **Clear your calendar** to focus on overdue items",
+        "3ï¸âƒ£ **Notify stakeholders** about any delays",
+        "4ï¸âƒ£ **Request deadline extensions** if needed",
         "",
-        "**💡 Professional Tip:** Tackle high-priority overdue tasks first, then work chronologically by due date.",
+        "**ðŸ’¡ Professional Tip:** Tackle high-priority overdue tasks first, then work chronologically by due date.",
         "",
-        f"**📊 Overview:** {count} overdue, {sum(1 for t in overdue_tasks if t['priority'] == 'High')} high priority"
+        f"**ðŸ“Š Overview:** {count} overdue, {sum(1 for t in overdue_tasks if t['priority'] == 'High')} high priority"
     ])
     
     return "\n".join(response_parts)
@@ -811,10 +792,10 @@ def handle_today_tasks(today_tasks: List[Dict], query: str) -> str:
     """Handle tasks due today"""
     
     count = len(today_tasks)
-    print(f"📅 Processing {count} tasks due today")
+    print(f"ðŸ“… Processing {count} tasks due today")
     
     response_parts = [
-        f"📅 **You have {count} task{'s' if count > 1 else ''} due TODAY:**",
+        f"ðŸ“… **You have {count} task{'s' if count > 1 else ''} due TODAY:**",
         ""
     ]
     
@@ -823,24 +804,24 @@ def handle_today_tasks(today_tasks: List[Dict], query: str) -> str:
         task_name = task['task_name']
         priority = task['priority']
         
-        priority_emoji = "🔴" if priority == "High" else "🟡" if priority == "Medium" else "🟢"
+        priority_emoji = "ðŸ”´" if priority == "High" else "ðŸŸ¡" if priority == "Medium" else "ðŸŸ¢"
         
         response_parts.append(
             f"{i}. {priority_emoji} **{task_name}** (Priority: {priority})"
         )
-        print(f"  📌 Today's task {i}: {task_name} ({priority})")
+        print(f"  ðŸ“Œ Today's task {i}: {task_name} ({priority})")
     
     # Provide specific recommendations
     high_priority_tasks = [t for t in today_tasks if t['priority'] == 'High']
     if high_priority_tasks:
         response_parts.extend([
             "",
-            f"**💡 Recommendation:** Start with HIGH priority: **{high_priority_tasks[0]['task_name']}**"
+            f"**ðŸ’¡ Recommendation:** Start with HIGH priority: **{high_priority_tasks[0]['task_name']}**"
         ])
     else:
         response_parts.extend([
             "",
-            f"**💡 Recommendation:** Start with: **{today_tasks[0]['task_name']}** and work systematically through the list."
+            f"**ðŸ’¡ Recommendation:** Start with: **{today_tasks[0]['task_name']}** and work systematically through the list."
         ])
     
     return "\n".join(response_parts)
@@ -848,17 +829,17 @@ def handle_today_tasks(today_tasks: List[Dict], query: str) -> str:
 def generate_team_task_response(query: str, parsed_data: Dict[str, Any]) -> str:
     """Generate response specifically for team task queries"""
     
-    print("🏢 Generating TEAM TASK response")
+    print("ðŸ¢ Generating TEAM TASK response")
     
     team_tasks = parsed_data.get("team_tasks", {})
     
     if not team_tasks:
-        return """🔍 **No Team Task Data Found**
+        return """ðŸ” **No Team Task Data Found**
 
 Unable to retrieve team task information. This could be because:
-• No team members have active tasks
-• Database access issue  
-• Team filtering not working properly
+â€¢ No team members have active tasks
+â€¢ Database access issue  
+â€¢ Team filtering not working properly
 
 **Suggestion:** Check individual user task dashboards directly."""
     
@@ -896,13 +877,13 @@ Unable to retrieve team task information. This could be because:
     
     # Build response based on query type
     if is_tech_team_query:
-        title = "🏢 **Tech Team Task Overview**"
+        title = "ðŸ¢ **Tech Team Task Overview**"
     elif is_lead_query:
-        title = "👑 **Team Lead Task Overview**"
+        title = "ðŸ‘‘ **Team Lead Task Overview**"
     elif is_member_query:
-        title = "👤 **Team Member Task Overview**"
+        title = "ðŸ‘¤ **Team Member Task Overview**"
     else:
-        title = "🏢 **Team Task Overview**"
+        title = "ðŸ¢ **Team Task Overview**"
     
     response_parts = [
         f"{title} ({total_tasks} tasks across {total_users} team members)",
@@ -912,7 +893,7 @@ Unable to retrieve team task information. This could be because:
     # Show overdue tasks first (CRITICAL)
     if overdue_tasks:
         response_parts.extend([
-            f"🚨 **CRITICAL - OVERDUE TASKS ({len(overdue_tasks)}):**",
+            f"ðŸš¨ **CRITICAL - OVERDUE TASKS ({len(overdue_tasks)}):**",
             ""
         ])
         
@@ -927,15 +908,15 @@ Unable to retrieve team task information. This could be because:
         for user, tasks in overdue_by_user.items():
             response_parts.append(f"**{user}** ({len(tasks)} overdue):")
             for task in tasks[:3]:  # Show max 3 per user
-                response_parts.append(f"  • {task['name']} (Due: {task['due']}, Priority: {task['priority']})")
+                response_parts.append(f"  â€¢ {task['name']} (Due: {task['due']}, Priority: {task['priority']})")
             if len(tasks) > 3:
-                response_parts.append(f"  • ...and {len(tasks) - 3} more overdue tasks")
+                response_parts.append(f"  â€¢ ...and {len(tasks) - 3} more overdue tasks")
             response_parts.append("")
     
     # Show today's tasks
     if today_tasks:
         response_parts.extend([
-            f"📅 **DUE TODAY ({len(today_tasks)}):**",
+            f"ðŸ“… **DUE TODAY ({len(today_tasks)}):**",
             ""
         ])
         
@@ -950,15 +931,15 @@ Unable to retrieve team task information. This could be because:
         for user, tasks in today_by_user.items():
             response_parts.append(f"**{user}** ({len(tasks)} due today):")
             for task in tasks[:3]:  # Show max 3 per user
-                response_parts.append(f"  • {task['name']} (Priority: {task['priority']})")
+                response_parts.append(f"  â€¢ {task['name']} (Priority: {task['priority']})")
             if len(tasks) > 3:
-                response_parts.append(f"  • ...and {len(tasks) - 3} more tasks due today")
+                response_parts.append(f"  â€¢ ...and {len(tasks) - 3} more tasks due today")
             response_parts.append("")
     
     # Show upcoming tasks (limited view)
     if upcoming_tasks:
         response_parts.extend([
-            f"📈 **UPCOMING TASKS (next 5 by due date):**",
+            f"ðŸ“ˆ **UPCOMING TASKS (next 5 by due date):**",
             ""
         ])
         
@@ -968,7 +949,7 @@ Unable to retrieve team task information. This could be because:
 )
         
         for task in upcoming_sorted[:5]:
-            response_parts.append(f"• **{task['user']}**: {task['name']} (Due: {task['due']}, Priority: {task['priority']})")
+            response_parts.append(f"â€¢ **{task['user']}**: {task['name']} (Due: {task['due']}, Priority: {task['priority']})")
         
         if len(upcoming_tasks) > 5:
             response_parts.append(f"...and {len(upcoming_tasks) - 5} more upcoming tasks")
@@ -976,59 +957,59 @@ Unable to retrieve team task information. This could be because:
     
     # Team summary and recommendations
     response_parts.extend([
-        "**📊 Team Summary:**",
-        f"• Total active tasks: {total_tasks}",
-        f"• Team members with tasks: {total_users}",
-        f"• Overdue tasks: {len(overdue_tasks)}",
-        f"• Due today: {len(today_tasks)}",
-        f"• Upcoming tasks: {len(upcoming_tasks)}",
+        "**ðŸ“Š Team Summary:**",
+        f"â€¢ Total active tasks: {total_tasks}",
+        f"â€¢ Team members with tasks: {total_users}",
+        f"â€¢ Overdue tasks: {len(overdue_tasks)}",
+        f"â€¢ Due today: {len(today_tasks)}",
+        f"â€¢ Upcoming tasks: {len(upcoming_tasks)}",
         ""
     ])
     
     # Actionable recommendations based on urgency
     if len(overdue_tasks) > 0:
         response_parts.extend([
-            "**⚠️ IMMEDIATE ACTION REQUIRED:**",
+            "**âš ï¸ IMMEDIATE ACTION REQUIRED:**",
             f"Team has {len(overdue_tasks)} overdue tasks across {len(set(task['user'] for task in overdue_tasks))} team members!",
             "",
             "**Recommendations:**",
-            "• Schedule urgent team standup to address overdue items",
-            "• Redistribute workload if team members are overwhelmed", 
-            "• Extend deadlines where appropriate and notify stakeholders",
-            "• Identify and remove blockers preventing task completion"
+            "â€¢ Schedule urgent team standup to address overdue items",
+            "â€¢ Redistribute workload if team members are overwhelmed", 
+            "â€¢ Extend deadlines where appropriate and notify stakeholders",
+            "â€¢ Identify and remove blockers preventing task completion"
         ])
     elif len(today_tasks) > 0:
         response_parts.extend([
-            "**💡 Today's Focus:**",
+            "**ðŸ’¡ Today's Focus:**",
             f"Team has {len(today_tasks)} tasks due today - monitor progress closely.",
             "",
             "**Recommendations:**",
-            "• Check in with team members during daily standup",
-            "• Be available to help remove any last-minute blockers", 
-            "• Prepare for potential deadline extensions if needed"
+            "â€¢ Check in with team members during daily standup",
+            "â€¢ Be available to help remove any last-minute blockers", 
+            "â€¢ Prepare for potential deadline extensions if needed"
         ])
     else:
         response_parts.extend([
-            "**✅ Excellent Status:**",
+            "**âœ… Excellent Status:**",
             "Team has no overdue tasks and nothing due today!",
             "",
             "**Recommendations:**",
-            "• Great time to plan ahead for upcoming deliverables",
-            "• Consider taking on additional stretch goals",
-            "• Focus on process improvements and team development"
+            "â€¢ Great time to plan ahead for upcoming deliverables",
+            "â€¢ Consider taking on additional stretch goals",
+            "â€¢ Focus on process improvements and team development"
         ])
     
     # If no tasks found at all
     if total_tasks == 0:
-        return f"""🎉 **{title.replace('**', '').replace('🏢 ', '').replace('👑 ', '').replace('👤 ', '')}**
+        return f"""ðŸŽ‰ **{title.replace('**', '').replace('ðŸ¢ ', '').replace('ðŸ‘‘ ', '').replace('ðŸ‘¤ ', '')}**
 
 No active tasks found for the specified team members.
 
 This could mean:
-• All team members are caught up with their work ✅
-• Tasks are managed in a different system
-• Team members haven't been assigned tasks yet
-• Database filtering issue
+â€¢ All team members are caught up with their work âœ…
+â€¢ Tasks are managed in a different system
+â€¢ Team members haven't been assigned tasks yet
+â€¢ Database filtering issue
 
 **Suggestion:** Verify task assignments and check if tasks are in a different status."""
     
@@ -1036,9 +1017,9 @@ This could mean:
 
 
 def generate_field_specific_response(query: str, parsed_data: Dict[str, Any]) -> str:
-    """🆕 NEW: Handle queries about specific task fields"""
+    """ðŸ†• NEW: Handle queries about specific task fields"""
     
-    print("🔍 Generating FIELD-SPECIFIC response")
+    print("ðŸ” Generating FIELD-SPECIFIC response")
     
     query_lower = query.lower()
     
@@ -1050,7 +1031,7 @@ def generate_field_specific_response(query: str, parsed_data: Dict[str, Any]) ->
     target_task_name = task_name_match.group(1).strip() if task_name_match else None
     
     if not target_task_name:
-        return """❌ **Please specify which task you're asking about.**
+        return """âŒ **Please specify which task you're asking about.**
 
 **Try asking like:**
 - "What is the created date for my task 'Project Proposal'?"
@@ -1070,7 +1051,7 @@ def generate_field_specific_response(query: str, parsed_data: Dict[str, Any]) ->
             break
     
     if not matching_task:
-        return f"""❌ **Task '{target_task_name}' not found in your active tasks.**
+        return f"""âŒ **Task '{target_task_name}' not found in your active tasks.**
 
 **Possible reasons:**
 - Task name spelling doesn't match exactly
@@ -1080,42 +1061,42 @@ def generate_field_specific_response(query: str, parsed_data: Dict[str, Any]) ->
 **Try:** "Show all my tasks" to see your complete task list."""
     
     # Determine what field user is asking about
-    response_parts = [f"📋 **Task Details: '{matching_task['task_name']}'**", ""]
+    response_parts = [f"ðŸ“‹ **Task Details: '{matching_task['task_name']}'**", ""]
     
     if "created" in query_lower or "creation date" in query_lower:
-        response_parts.append(f"🗓️ **Created:** {matching_task.get('created_date', 'Date not available')}")
+        response_parts.append(f"ðŸ—“ï¸ **Created:** {matching_task.get('created_date', 'Date not available')}")
     
     if "due" in query_lower:
-        response_parts.append(f"📅 **Due Date:** {matching_task['due_date']}")
+        response_parts.append(f"ðŸ“… **Due Date:** {matching_task['due_date']}")
     
     if "status" in query_lower:
-        response_parts.append(f"📊 **Status:** {matching_task['status']}")
+        response_parts.append(f"ðŸ“Š **Status:** {matching_task['status']}")
     
     if "priority" in query_lower:
-        response_parts.append(f"🎯 **Priority:** {matching_task['priority']}")
+        response_parts.append(f"ðŸŽ¯ **Priority:** {matching_task['priority']}")
     
     # If no specific field mentioned, show all details
     if not any(word in query_lower for word in ["created", "due", "status", "priority"]):
         response_parts.extend([
-            f"📊 **Status:** {matching_task['status']}",
-            f"🎯 **Priority:** {matching_task['priority']}",
-            f"📅 **Due Date:** {matching_task['due_date']}",
-            f"⏰ **Urgency:** {matching_task['urgency']}",
-            f"🗓️ **Created:** {matching_task.get('created_date', 'Date not available')}"
+            f"ðŸ“Š **Status:** {matching_task['status']}",
+            f"ðŸŽ¯ **Priority:** {matching_task['priority']}",
+            f"ðŸ“… **Due Date:** {matching_task['due_date']}",
+            f"â° **Urgency:** {matching_task['urgency']}",
+            f"ðŸ—“ï¸ **Created:** {matching_task.get('created_date', 'Date not available')}"
         ])
     
     return "\n".join(response_parts)
 
 
 def generate_kanban_response(query: str, parsed_data: Dict[str, Any]) -> str:
-    """🆕 NEW: Handle Kanban-specific queries"""
+    """ðŸ†• NEW: Handle Kanban-specific queries"""
     
-    print("📋 Generating KANBAN response")
+    print("ðŸ“‹ Generating KANBAN response")
     
     # This would need kanban-specific data in parsed_data
     # You'll need to enhance parse_user_context to include kanban column info
     
-    return """📋 **Your Kanban Board Overview**
+    return """ðŸ“‹ **Your Kanban Board Overview**
 
 **Note:** For detailed Kanban information, please use the Kanban board view directly.
 
@@ -1132,9 +1113,9 @@ def generate_kanban_response(query: str, parsed_data: Dict[str, Any]) -> str:
 
 
 def generate_date_message_response(query: str, parsed_data: Dict[str, Any]) -> str:
-    """🆕 NEW: Handle date-specific message queries"""
+    """ðŸ†• NEW: Handle date-specific message queries"""
     
-    print("📅 Generating DATE-SPECIFIC MESSAGE response")
+    print("ðŸ“… Generating DATE-SPECIFIC MESSAGE response")
     
     messages = parsed_data["messages"]
     query_lower = query.lower()
@@ -1157,7 +1138,7 @@ def generate_date_message_response(query: str, parsed_data: Dict[str, Any]) -> s
         
         if date_messages:
             response_parts = [
-                f"📧 **Messages from {target_date}:**",
+                f"ðŸ“§ **Messages from {target_date}:**",
                 ""
             ]
             
@@ -1165,54 +1146,54 @@ def generate_date_message_response(query: str, parsed_data: Dict[str, Any]) -> s
                 time = msg.get("timestamp_str", "Unknown time")
                 sender = msg.get("sender_name", "Unknown")
                 content = msg.get("message_content", "")
-                response_parts.append(f"• [{time}] **{sender}**: {content}")
+                response_parts.append(f"â€¢ [{time}] **{sender}**: {content}")
             
             return "\n".join(response_parts)
         else:
-            return f"❌ **No messages found for {target_date}**\n\nYou may not have received any messages on this date, or they may have been archived."
+            return f"âŒ **No messages found for {target_date}**\n\nYou may not have received any messages on this date, or they may have been archived."
     
-    return "❌ **Couldn't parse the date from your query.**\n\nTry asking like: 'Did I get any messages on September 5, 2025?'"
+    return "âŒ **Couldn't parse the date from your query.**\n\nTry asking like: 'Did I get any messages on September 5, 2025?'"
 
 
 def handle_no_team_tasks(query: str) -> str:
     """Handle when no team tasks are found"""
     
-    print("✅ No team tasks found - generating informative response")
+    print("âœ… No team tasks found - generating informative response")
     
-    return """🔍 **No Team Task Data Available**
+    return """ðŸ” **No Team Task Data Available**
 
 Unable to retrieve team task information for your query.
 
 **Possible reasons:**
-• Team members have no active tasks assigned
-• Tasks may be in "Completed" or "Archived" status  
-• Database connection or filtering issue
-• Team structure not properly configured
+â€¢ Team members have no active tasks assigned
+â€¢ Tasks may be in "Completed" or "Archived" status  
+â€¢ Database connection or filtering issue
+â€¢ Team structure not properly configured
 
 **What you can do:**
-• Check individual team member dashboards
-• Verify team assignments in user management
-• Look at completed tasks to see recent activity
-• Contact your system administrator if this seems incorrect
+â€¢ Check individual team member dashboards
+â€¢ Verify team assignments in user management
+â€¢ Look at completed tasks to see recent activity
+â€¢ Contact your system administrator if this seems incorrect
 
 **Try asking:**
-• "Show my tasks today" (for personal tasks)
-• "What should I work on today?" (for personal priorities)
-• "Any messages from the team?" (for team communications)"""
+â€¢ "Show my tasks today" (for personal tasks)
+â€¢ "What should I work on today?" (for personal priorities)
+â€¢ "Any messages from the team?" (for team communications)"""
 
 
 def handle_upcoming_tasks(upcoming_tasks: List[Dict], query: str) -> str:
     """Handle upcoming tasks when nothing is due today"""
     
     count = len(upcoming_tasks)
-    print(f"📈 Processing {count} upcoming tasks")
+    print(f"ðŸ“ˆ Processing {count} upcoming tasks")
     
     # Sort upcoming tasks by due date
     sorted_tasks = sorted(upcoming_tasks, key=lambda x: x['due_date'] if x['due_date'] != 'No date' else '2999-12-31')
     
     response_parts = [
-        "✅ **Excellent! No tasks due today.**",
-        f"📈 You have {count} upcoming task{'s' if count > 1 else ''}:",
+        "âœ… **Excellent! No tasks due today.**",
+        f"ðŸ“ˆ You have {count} upcoming task{'s' if count > 1 else ''}:",
         ""
     ]
     
@@ -1225,7 +1206,7 @@ def handle_upcoming_tasks(upcoming_tasks: List[Dict], query: str) -> str:
         response_parts.append(
             f"{i}. **{task_name}** (Due: {due_date}, Priority: {priority})"
         )
-        print(f"  📌 Upcoming task {i}: {task_name} (Due: {due_date})")
+        print(f"  ðŸ“Œ Upcoming task {i}: {task_name} (Due: {due_date})")
     
     if count > 5:
         response_parts.append(f"...and {count - 5} more upcoming tasks")
@@ -1235,13 +1216,13 @@ def handle_upcoming_tasks(upcoming_tasks: List[Dict], query: str) -> str:
     if next_task:
         response_parts.extend([
             "",
-            f"**💡 Perfect time to get ahead!**",
-            f"🎯 **Consider starting early on: '{next_task['task_name']}' (Due: {next_task['due_date']})**",
+            f"**ðŸ’¡ Perfect time to get ahead!**",
+            f"ðŸŽ¯ **Consider starting early on: '{next_task['task_name']}' (Due: {next_task['due_date']})**",
             "",
             "**Other options:**",
-            "• Focus on professional development",
-            "• Review and organize your workflow", 
-            "• Plan ahead for upcoming projects"
+            "â€¢ Focus on professional development",
+            "â€¢ Review and organize your workflow", 
+            "â€¢ Plan ahead for upcoming projects"
         ])
     
     return "\n".join(response_parts)
@@ -1249,16 +1230,16 @@ def handle_upcoming_tasks(upcoming_tasks: List[Dict], query: str) -> str:
 def handle_no_tasks(query: str) -> str:
     """Handle when no tasks are found"""
     
-    print("✅ No tasks found - generating positive response")
+    print("âœ… No tasks found - generating positive response")
     
-    return """🎉 **Outstanding! No pending tasks found.**
+    return """ðŸŽ‰ **Outstanding! No pending tasks found.**
 
 You're completely caught up! This is perfect timing to:
-• 🚀 Plan ahead for upcoming projects  
-• 📚 Focus on professional development
-• 🧘 Take a well-deserved break
-• 🗂️ Review and organize your workflow
-• 💡 Brainstorm new ideas or improvements
+â€¢ ðŸš€ Plan ahead for upcoming projects  
+â€¢ ðŸ“š Focus on professional development
+â€¢ ðŸ§˜ Take a well-deserved break
+â€¢ ðŸ—‚ï¸ Review and organize your workflow
+â€¢ ðŸ’¡ Brainstorm new ideas or improvements
 
 **Keep up the excellent work!** You're ahead of schedule and in great shape."""
 
@@ -1267,7 +1248,7 @@ You're completely caught up! This is perfect timing to:
 def generate_message_response(query: str, parsed_data: Dict[str, Any]) -> str:
     """Generate response specifically for message queries"""
     
-    print("💬 Generating MESSAGE response")
+    print("ðŸ’¬ Generating MESSAGE response")
     
     messages = parsed_data["messages"]
     query_lower = query.lower()
@@ -1281,7 +1262,7 @@ def generate_message_response(query: str, parsed_data: Dict[str, Any]) -> str:
             mentioned_person = member
             break
     
-    print(f"👤 Looking for messages from: {mentioned_person}")
+    print(f"ðŸ‘¤ Looking for messages from: {mentioned_person}")
     
     # Handle different message query types
     if mentioned_person:
@@ -1302,23 +1283,23 @@ def handle_person_specific_messages(messages: Dict, person: str, query: str) -> 
             person_messages.extend(msg_list)
     
     if person_messages:
-        response_parts = [f"✅ **Yes, you received messages from {person}:**", ""]
+        response_parts = [f"âœ… **Yes, you received messages from {person}:**", ""]
         
         today_msgs = [m for m in person_messages if m["recency"] == "today"]
         if today_msgs:
             response_parts.append("**Today:**")
             for msg in today_msgs[:3]:
-                response_parts.append(f"• {msg['timestamp_str']}: {msg['message_content']}")
+                response_parts.append(f"â€¢ {msg['timestamp_str']}: {msg['message_content']}")
         
         yesterday_msgs = [m for m in person_messages if m["recency"] == "yesterday"]  
         if yesterday_msgs:
             response_parts.append("**Yesterday:**")
             for msg in yesterday_msgs[:2]:
-                response_parts.append(f"• {msg['timestamp_str']}: {msg['message_content']}")
+                response_parts.append(f"â€¢ {msg['timestamp_str']}: {msg['message_content']}")
                 
         return "\n".join(response_parts)
     else:
-        return f"❌ **No recent messages from {person}.**\n\nTry checking the spelling or look at your full message history."
+        return f"âŒ **No recent messages from {person}.**\n\nTry checking the spelling or look at your full message history."
 
 def handle_today_messages(messages: Dict, query: str) -> str:
     """Handle today's messages query"""
@@ -1327,14 +1308,14 @@ def handle_today_messages(messages: Dict, query: str) -> str:
     
     if today_msgs:
         count = len(today_msgs)
-        response_parts = [f"📧 **You received {count} message{'s' if count > 1 else ''} today:**", ""]
+        response_parts = [f"ðŸ“§ **You received {count} message{'s' if count > 1 else ''} today:**", ""]
         
         for msg in today_msgs[:5]:
-            response_parts.append(f"• **{msg['sender_name']}** ({msg['timestamp_str']}): {msg['message_content']}")
+            response_parts.append(f"â€¢ **{msg['sender_name']}** ({msg['timestamp_str']}): {msg['message_content']}")
             
         return "\n".join(response_parts)
     else:
-        return "❌ **No messages received today.**\n\n🔭 Your inbox is empty for today."
+        return "âŒ **No messages received today.**\n\nðŸ”­ Your inbox is empty for today."
 
 def handle_yesterday_messages(messages: Dict, query: str) -> str:
     """Handle yesterday's messages query"""
@@ -1343,14 +1324,14 @@ def handle_yesterday_messages(messages: Dict, query: str) -> str:
     
     if yesterday_msgs:
         count = len(yesterday_msgs)
-        response_parts = [f"📧 **You received {count} message{'s' if count > 1 else ''} yesterday:**", ""]
+        response_parts = [f"ðŸ“§ **You received {count} message{'s' if count > 1 else ''} yesterday:**", ""]
         
         for msg in yesterday_msgs[:5]:
-            response_parts.append(f"• **{msg['sender_name']}** ({msg['timestamp_str']}): {msg['message_content']}")
+            response_parts.append(f"â€¢ **{msg['sender_name']}** ({msg['timestamp_str']}): {msg['message_content']}")
             
         return "\n".join(response_parts)
     else:
-        return "❌ **No messages received yesterday.**"
+        return "âŒ **No messages received yesterday.**"
 
 def handle_general_messages(messages: Dict, query: str) -> str:
     """Handle general message queries"""
@@ -1358,9 +1339,9 @@ def handle_general_messages(messages: Dict, query: str) -> str:
     total = messages["total_count"]
     
     if total == 0:
-        return "❌ **No recent messages found.**\n\nCheck your message settings or try refreshing."
+        return "âŒ **No recent messages found.**\n\nCheck your message settings or try refreshing."
     
-    response_parts = [f"📧 **Message Summary ({total} total messages):**", ""]
+    response_parts = [f"ðŸ“§ **Message Summary ({total} total messages):**", ""]
     
     if messages["today"]:
         response_parts.append(f"**Today:** {len(messages['today'])} messages")
@@ -1375,14 +1356,14 @@ def handle_general_messages(messages: Dict, query: str) -> str:
         sorted_senders = sorted(messages["by_sender"].items(), 
                               key=lambda x: len(x[1]), reverse=True)[:3]
         for sender, msg_list in sorted_senders:
-            response_parts.append(f"• {sender}: {len(msg_list)} messages")
+            response_parts.append(f"â€¢ {sender}: {len(msg_list)} messages")
     
     return "\n".join(response_parts)
 
 def generate_general_response(query: str, parsed_data: Dict[str, Any], context: str) -> str:
     """Generate response for general queries using LLM"""
     
-    print("🤖 Generating GENERAL response with LLM")
+    print("ðŸ¤– Generating GENERAL response with LLM")
     
     os.environ["OLLAMA_BASE_URL"] = "http://localhost:11434"
     
@@ -1410,8 +1391,8 @@ Response:
         return result.strip()
         
     except Exception as e:
-        print(f"❌ LLM call failed: {e}")
-        return "⚠️ Unable to process your request right now. Please try again in a moment."
+        print(f"âŒ LLM call failed: {e}")
+        return "âš ï¸ Unable to process your request right now. Please try again in a moment."
 
 # Keep the existing interpret_query function
 def interpret_query(query: str, hints: Dict[str, Any] | None = None) -> Dict[str, Any]:
