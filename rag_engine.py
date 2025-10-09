@@ -41,6 +41,7 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
             "today": [],
             "yesterday": [],
             "this_week": [],
+             "older": [],  
             "total_count": 0,
             "by_sender": {}
         },
@@ -165,9 +166,11 @@ def parse_user_context(user_context: str) -> Dict[str, Any]:
                         parsed_data["messages"]["today"].append(msg_info)
                     elif msg_info["recency"] == "yesterday":
                         parsed_data["messages"]["yesterday"].append(msg_info)
-                    else:
+                    elif msg_info["recency"] == "this_week":
                         parsed_data["messages"]["this_week"].append(msg_info)
-                    
+                    else:
+                        parsed_data["messages"]["older"].append(msg_info)   # 👈 true “older” now
+
                     # Group by sender
                     sender = msg_info["sender_name"]
                     if sender not in parsed_data["messages"]["by_sender"]:
@@ -1200,6 +1203,14 @@ def generate_date_message_response(query: str, parsed_data: Dict[str, Any]) -> s
     
     # 🔧 FIXED: Better date extraction with multiple patterns
     target_date = None
+
+    # ✅ Handle relative words first (so "yesterday" works)
+    ql = query_lower
+    if "yesterday" in ql:
+        target_date = (datetime.utcnow().date() - timedelta(days=1)).isoformat()
+    elif "today" in ql:
+        target_date = datetime.utcnow().date().isoformat()
+
     
     # Pattern 1: "October 7, 2025" or "October 7 2025"
     month_match = re.search(r'(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d+),?\s*(\d{4})?', query_lower)
@@ -1253,9 +1264,10 @@ Try asking like:
     
     # 🔧 FIXED: Search ALL message categories
     all_messages = (
-        messages.get("today", []) + 
-        messages.get("yesterday", []) + 
-        messages.get("this_week", [])
+        messages.get("today", []) +
+        messages.get("yesterday", []) +
+        messages.get("this_week", []) +
+        messages.get("older", [])
     )
     
     print(f"📊 Total messages to search: {len(all_messages)}")
@@ -1266,10 +1278,12 @@ Try asking like:
 
     # Search all categories
     all_msgs = (
-        messages.get("today", []) +
-        messages.get("yesterday", []) +
-        messages.get("this_week", [])
-    )
+    messages.get("today", []) +
+    messages.get("yesterday", []) +
+    messages.get("this_week", []) +
+    messages.get("older", [])          # 👈 include older
+)
+
 
     for m in all_msgs:
         # 1) prefer explicit parsed date (stored by parse_message_line)
