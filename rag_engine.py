@@ -491,6 +491,9 @@ def parse_message_line(line: str) -> Dict[str, Any]:
             date_str = m.group(4).strip()  # ✅ Got the date!
             message_count = 1
             print(f"✅ EXTRACTED: sender={sender_name}, date={date_str}, time={timestamp_str}")
+            # just before the return, optionally normalize to ISO:
+            
+
         else:  # simple 2-group forms
             sender_name = m.group(1).strip()
             message_content = m.group(2).strip() if len(m.groups()) >= 2 else ""
@@ -558,13 +561,27 @@ def parse_message_line(line: str) -> Dict[str, Any]:
 
     print(f"📊 Final: sender={sender_name}, recency={recency}, content={message_content[:30]}")
 
+    # --- normalize a reliable ISO date for downstream filters ---
+    norm_date = None
+    if date_str:
+        m_iso = re.search(r"(\d{4}-\d{2}-\d{2})", date_str)
+        if m_iso:
+            norm_date = m_iso.group(1)
+    else:
+        # sometimes the date is embedded in timestamp_str
+        m_iso = re.search(r"(\d{4}-\d{2}-\d{2})", timestamp_str or "")
+        if m_iso:
+            norm_date = m_iso.group(1)
+
     return {
         "sender_name": sender_name,
         "message_content": message_content,
         "timestamp_str": timestamp_str,
         "recency": recency,
-        "message_count": message_count
+        "message_count": message_count,
+        "date_str": norm_date or (date_str or "")
     }
+
 
 
 def classify_query_type(query: str, team_members: List[str] = None) -> str:
@@ -1246,29 +1263,36 @@ Try asking like:
     
     # Filter messages for target date
     date_messages = []
-    for msg in all_messages:
-        # Get the ISO date from timestamp_str (format: "HH:MM AM/PM, YYYY-MM-DD")
-        msg_timestamp = msg.get("timestamp_str", "")
-        
-        # Extract YYYY-MM-DD from the timestamp
-        date_match = re.search(r'(\d{4}-\d{2}-\d{2})', msg_timestamp)
-        
-        if date_match:
-            msg_date = date_match.group(0)
-            print(f"  🔍 Comparing: Message date={msg_date} vs Target={target_date}")
-            
-            if is_specific_day:
-                # EXACT match for "on" queries
-                if msg_date == target_date:
-                    date_messages.append(msg)
-                    print(f"    ✅ EXACT MATCH! Added message from {msg.get('sender_name')}")
-            else:
-                # Range match for "from/since" queries
-                if msg_date >= target_date:
-                    date_messages.append(msg)
-                    print(f"    ✅ RANGE MATCH! Added message from {msg.get('sender_name')}")
+
+    # Search all categories
+    all_msgs = (
+        messages.get("today", []) +
+        messages.get("yesterday", []) +
+        messages.get("this_week", [])
+    )
+
+    for m in all_msgs:
+        # 1) prefer explicit parsed date (stored by parse_message_line)
+        candidate = m.get("date_str", "")
+
+        # 2) fallback: look for ISO date in timestamp/content
+        if not candidate:
+            for field in (m.get("timestamp_str", ""), m.get("message_content", "")):
+                mm = re.search(r"(\d{4}-\d{2}-\d{2})", field or "")
+                if mm:
+                    candidate = mm.group(1)
+                    break
+
+        if is_specific_day:
+            if candidate == target_date:
+                date_messages.append(m)
         else:
-            print(f"  ⚠️ No date found in timestamp: {msg_timestamp}")
+            # "from/since" style queries
+            if candidate and candidate >= target_date:
+                date_messages.append(m)
+
+        # else:
+        #     print(f"  ⚠️ No date found in timestamp: {msg_timestamp}")
     
     print(f"📊 Found {len(date_messages)} messages for {target_date}")
     
