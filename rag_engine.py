@@ -211,7 +211,8 @@ def parse_task_line(line: str) -> Dict[str, Any]:
         
         pm = re.search(r"Priority:\s*([^,)\]]+)", meta, re.I)
         sm = re.search(r"Status:\s*([^,)\]]+)", meta, re.I)
-        dm = re.search(r"Due:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", meta, re.I)
+        dm = re.search(r"Due(?:\s*Date)?\s*:\s*([0-9]{4}-[0-9]{2}-[0-9]{2})", meta, re.I)
+
         # 🆕 NEW: Extract created date
         cm = re.search(r"Created:\s*([^,)\]]+)", meta, re.I)
         # 🆕 NEW: Extract Task ID
